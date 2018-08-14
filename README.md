@@ -1,4 +1,4 @@
-This repository contains  in [MXNet](https://mxnet.incubator.apache.org/) implementations of models from various papers. My plan is to first focus on generative image models.
+This repository contains [MXNet](https://mxnet.incubator.apache.org/) implementations of models from various papers. My plan is to first focus on generative image models.
 
 Currently, I have
 - [Variational autoencoder](vae/README.md) from [1] (Completed)
