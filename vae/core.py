@@ -49,12 +49,11 @@ class VAELossKLTerm(Loss):
     First term in Eqn. 10 in the paper.
     Note we return the negative KL so it we would like to minimize the sum of this with the fit term.
     """
-    def __init__(self, latent_dim: int, batch_axis: int = 0):
+    def __init__(self, latent_dim: int):
         """
         :param latent_dim: Dimensionality of latent space.
-        :param batch_axis: The index of the batch axis.
         """
-        super().__init__(weight=1, batch_axis=batch_axis)
+        super().__init__(weight=1, batch_axis=0)
 
         self._latent_dim = latent_dim
 
@@ -64,9 +63,9 @@ class VAELossKLTerm(Loss):
         log_sd = q[:, self._latent_dim:]
 
         # first term in Eq. 10. acts as a
-        kl_term = 0.5 * (self._latent_dim + F.sum(2. * log_sd, axis=self._batch_axis, exclude=True) -
-                         F.sum(F.square(mu), axis=self._batch_axis, exclude=True) -
-                         F.sum(F.exp(2. * log_sd), axis=self._batch_axis, exclude=True))
+        kl_term = 0.5 * (self._latent_dim + F.sum(2. * log_sd, axis=0, exclude=True) -
+                         F.sum(F.square(mu), axis=0, exclude=True) -
+                         F.sum(F.exp(2. * log_sd), axis=0, exclude=True))
 
         return -kl_term  # note the minus sign
 
@@ -77,22 +76,21 @@ class VAELoss(Loss):
 
     See Eq. 10 in the paper.
     """
-    def __init__(self, fit_loss: Loss, input_dim: int, latent_dim: int, batch_axis: int = 0):
+    def __init__(self, fit_loss: Loss, input_dim: int, latent_dim: int):
         """
         :param fit_loss: Loss used for p(x|z), i.e., reconstruction loss. Note the output of VAE is not passed through
-            sigmoid.
+            sigmoid. We assume that the loss function averages over (input/output) features, rather than summing.
         :param input_dim: Input dimensionality.
         :param latent_dim: Dimensionality of latent space
-        :param batch_axis: The index of the batch axis.
         """
-        super().__init__(weight=1, batch_axis=batch_axis)
+        super().__init__(weight=1, batch_axis=0)
 
         self._input_dim = input_dim
         self._latent_dim = latent_dim
 
         with self.name_scope():
             self._fit_loss = fit_loss
-            self._kl_loss = VAELossKLTerm(latent_dim, batch_axis=batch_axis)
+            self._kl_loss = VAELossKLTerm(latent_dim)
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         # x: input, args[0]: latent prob. distribution, args[1]: output of VAE (before sigmoid)
@@ -100,7 +98,7 @@ class VAELoss(Loss):
         y = args[1]
 
         kl_term = self._kl_loss(q)
-        fit_term = self._fit_loss(y, x) * self._input_dim
+        fit_term = self._fit_loss(y, x) * self._input_dim  # fix averaging over features by mult by input dim
 
         return fit_term + kl_term
 

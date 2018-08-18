@@ -9,7 +9,7 @@ An [MXNet](https://mxnet.incubator.apache.org/) implementation of the variationa
 `train_mnist.py`trains a variational autoencoder on MNIST dataset. The above picture shows the 2D latent space for a model trained with the default parameters.
 
 ```
-usage: vae.py [-h] [--batch_size BATCH_SIZE] [--input_height INPUT_HEIGHT]
+usage: train_mnist.py [-h] [--batch_size BATCH_SIZE] [--input_height INPUT_HEIGHT]
               [--input_width INPUT_WIDTH]
               [--num_encoder_units NUM_ENCODER_UNITS]
               [--num_decoder_units NUM_DECODER_UNITS]
