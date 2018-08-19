@@ -1,8 +1,8 @@
 This repository contains [MXNet](https://mxnet.incubator.apache.org/) implementations of models from various papers. My plan is to first focus on generative image models.
 
 Currently, I have
-- [Variational autoencoder](vae/README.md) from [1] (Completed)
-- [DRAW](draw/README.md) from [2] (In progress)
+- [Variational autoencoder](vae/) from [1] (Completed)
+- [DRAW](draw/) from [2] (In progress)
 
 See the README file under its folder for instructions on running a model.
 

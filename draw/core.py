@@ -8,7 +8,7 @@ An MxNet implementation of the recurrent variational autoencoder described in
 goker erdogan
 https://github.com/gokererdogan
 """
-from typing import Optional
+from typing import Optional, Tuple
 
 import mxnet as mx
 import mxnet.ndarray as nd
@@ -17,8 +17,6 @@ from mxnet.gluon.nn import Dense, HybridBlock
 from mxnet.gluon.rnn import LSTMCell
 
 from vae.core import NormalSamplingBlock, VAELoss
-
-NoAttentionWrite = Dense  # Write with no attention is just a fully connected layer
 
 
 class NoAttentionRead(HybridBlock):
@@ -35,30 +33,137 @@ class NoAttentionRead(HybridBlock):
         return F.concat(x, err, dim=1)
 
 
-class SelectiveAttentionRead(HybridBlock):
+class NoAttentionWrite(HybridBlock):
+    """
+    Read block with no attention.
+
+    Section 3.1 in the paper. This is simply a fully connected linear layer.
+    """
+    def __init__(self, input_dim: int, prefix: Optional[str] = None):
+        """
+        :param input_dim: Number of elements in input (e.g., height x width for image input).
+        :param prefix: Prefix for block.
+        """
+        super().__init__(prefix=prefix)
+
+        with self.name_scope():
+            self._write_layer = Dense(units=input_dim)
+
+    def hybrid_forward(self, F, h_dec, *args, **kwargs):
+        c_dec = args[0]
+        return self._write_layer(F.concat(h_dec, c_dec, dim=1))
+
+
+class SelectiveAttentionBase(HybridBlock):
+    """
+    Selective attention model base class.
+
+    This class implements the attention filter construction which is used by both read and write attention modules.
+    See Section 3.2 in the paper.
+    """
+    def __init__(self, filter_size: int, input_shape: Tuple[int, int], batch_size: int, prefix: Optional[str] = None):
+        """
+        :param filter_size: Size of the filter. Assumes square NxN filter.
+        :param input_shape: Input shape (2-tuple: HxW).
+        :param batch_size: Batch size.
+        :param prefix: Prefix for block.
+        """
+        super().__init__(prefix=prefix)
+
+        self._filter_size = filter_size
+        self._input_shape = input_shape
+        self._larger_input_dim = input_shape[0] if input_shape[0] > input_shape[1] else input_shape[1]
+        self._batch_size = batch_size
+
+        with self.name_scope():
+            self._attention_params_layer = Dense(units=5)
+
+    def _build_filter(self, F, attn_params):
+        # attn params (batch x 5): gx_tilde, gy_tilde, log_var, log_delta_tilde, log_gamma (Eqn. 21)
+
+        # Input image is M x A x B (M: batch size)
+        # Filter for each image is N x N
+        # F_x will be M x N x A
+        # F_y will be M x N x B
+
+        gx = ((self._input_shape[0] + 1.) / 2) * (attn_params[:, 0] + 1)
+        gy = ((self._input_shape[1] + 1.) / 2) * (attn_params[:, 1] + 1)
+        delta = ((self._larger_input_dim - 1) / (self._filter_size - 1)) * F.exp(attn_params[:, 3])
+
+        # Eqn. 19 and 20.
+        mu_vec = F.arange(1, self._filter_size+1) - (self._filter_size / 2.) - 0.5
+        # A x N x M
+        mu_x = gx + (delta * F.broadcast_to(nd.expand_dims(nd.expand_dims(mu_vec, axis=1), axis=0),
+                                            (self._input_shape[0], 0, self._batch_size)))
+        # B x N x M
+        mu_y = gy + (delta * F.broadcast_to(nd.expand_dims(nd.expand_dims(mu_vec, axis=1), axis=0),
+                                            (self._input_shape[1], 0, self._batch_size)))
+
+        # Eqn. 25 and 26.
+        # A x N x M
+        Fx_grid = nd.broadcast_to(nd.expand_dims(nd.expand_dims(nd.arange(1, self._input_shape[0]+1), axis=1), axis=1),
+                                  (0, self._filter_size, self._batch_size))
+        Fx = F.softmax(-F.square(Fx_grid - mu_x) / (2. * F.exp(attn_params[:, 2])), axis=0)
+        # B x N x M
+        Fy_grid = nd.broadcast_to(nd.expand_dims(nd.expand_dims(nd.arange(1, self._input_shape[1]+1), axis=1), axis=1),
+                                  (0, self._filter_size, self._batch_size))
+        Fy = F.softmax(-F.square(Fy_grid - mu_y) / (2. * F.exp(attn_params[:, 2])), axis=0)
+
+        return F.transpose(Fx), F.transpose(Fy)
+
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        raise NotImplemented
+
+
+class SelectiveAttentionRead(SelectiveAttentionBase):
     """
     Selective attention read block.
 
     Section 3.2 in the paper.
     """
-    def __init__(self, prefix: Optional[str] = None):
-        super().__init__(prefix=prefix)
+    def __init__(self, filter_size: int, input_shape: Tuple[int, int], batch_size: int, prefix: Optional[str] = None):
+        super().__init__(filter_size, input_shape, batch_size, prefix=prefix)
 
     def hybrid_forward(self, F, x, *args, **kwargs):
-        raise NotImplemented
+        err = args[0]
+        h_dec = args[1]
+        c_dec = args[2]
+        attn_params = self._attention_params_layer(F.concat(h_dec, c_dec, dim=1))
+        Fx, Fy = self._build_filter(F, attn_params)
+
+        # Eqn. 27
+        read_x = F.stack(*[F.dot(F.dot(Fx_i, x_i), Fy_i.T) for
+                           Fx_i, x_i, Fy_i in zip(Fx, F.reshape(x, (-1, *self._input_shape)), Fy)], axis=0)
+        read_err = F.stack(*[F.dot(F.dot(Fx_i, err_i), Fy_i.T) for
+                             Fx_i, err_i, Fy_i in zip(Fx, F.reshape(err, (-1, *self._input_shape)), Fy)], axis=0)
+        read = F.exp(attn_params[:, 4:5]) * F.concat(F.flatten(read_x), F.flatten(read_err))
+        return read
 
 
-class SelectiveAttentionWrite(HybridBlock):
+class SelectiveAttentionWrite(SelectiveAttentionBase):
     """
     Selective attention write block.
 
     Section 3.2 in the paper.
     """
-    def __init__(self, prefix: Optional[str] = None):
-        super().__init__(prefix=prefix)
+    def __init__(self, filter_size: int, input_shape: Tuple[int, int], batch_size: int, prefix: Optional[str] = None):
+        super().__init__(filter_size, input_shape, batch_size, prefix=prefix)
 
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        raise NotImplemented
+        with self.name_scope():
+            self._patch_layer = Dense(units=self._filter_size * self._filter_size)
+
+    def hybrid_forward(self, F, h_dec, *args, **kwargs):
+        c_dec = args[0]
+        dec = F.concat(h_dec, c_dec, dim=1)
+        attn_params = self._attention_params_layer(dec)
+        Fx, Fy = self._build_filter(F, attn_params)
+
+        # Eqn. 28, 29
+        w = self._patch_layer(dec)
+        write = F.stack(*[F.reshape(F.dot(F.dot(Fx_i.T, w_i), Fy_i), (-1,)) for
+                          Fx_i, w_i, Fy_i in zip(Fx, F.reshape(w, (-1, self._filter_size, self._filter_size)), Fy)],
+                        axis=0) * (1 / F.exp(attn_params[:, 4:5]))
+        return write
 
 
 class DRAW(HybridBlock):
@@ -123,7 +228,7 @@ class DRAW(HybridBlock):
             for i in range(self._num_steps):
                 z = nd.random.normal(shape=(n, self._latent_dim))
                 _, (h_dec, c_dec) = self._dec_rnn(z, [h_dec, c_dec])
-                w = self._write_layer(h_dec)
+                w = self._write_layer(h_dec, c_dec)
                 canvas = canvas + w
         return nd.sigmoid(canvas)
 
@@ -148,7 +253,7 @@ class DRAW(HybridBlock):
                 z = self._latent_layer(q)
 
                 _, (h_dec, c_dec) = self._dec_rnn(z, [h_dec, c_dec])
-                w = self._write_layer(h_dec)
+                w = self._write_layer(h_dec, c_dec)
                 canvas = canvas + w
 
         # don't pass canvas through sigmoid. loss function takes care of that.

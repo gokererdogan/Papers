@@ -12,7 +12,7 @@ from mxnet.io import DataIter
 from numpy import inf
 
 from common import get_mnist
-from draw.core import DRAW, DRAWLoss, NoAttentionRead, NoAttentionWrite
+from draw.core import DRAW, DRAWLoss, NoAttentionRead, NoAttentionWrite, SelectiveAttentionRead, SelectiveAttentionWrite
 
 
 def parse_args():
@@ -31,6 +31,9 @@ def parse_args():
     ap.add_argument("--val_freq", '-f', type=int, default=2e3, help="Validation frequency (run validation every "
                                                                     "val_freq training samples)")
     ap.add_argument("--gpu", action='store_true', default=False, help="If True, train on GPU")
+    ap.add_argument("--attention", action='store_true', default=False, help="If True, train with selective attention.")
+    ap.add_argument("--read_size", '-ar', type=int, default=2, help="If True, train with selective attention.")
+    ap.add_argument("--write_size", '-aw', type=int, default=5, help="If True, train with selective attention.")
 
     return ap.parse_args()
 
@@ -62,8 +65,12 @@ if __name__ == "__main__":
     train_iter, val_iter = get_mnist(batch_size=args.batch_size, input_shape=input_shape)
 
     # build the network
-    read_nn = NoAttentionRead()
-    write_nn = NoAttentionWrite(units=input_dim)
+    if not args.attention:
+        read_nn = NoAttentionRead()
+        write_nn = NoAttentionWrite(input_dim)
+    else:
+        read_nn = SelectiveAttentionRead(args.read_size, input_shape, args.batch_size)
+        write_nn = SelectiveAttentionWrite(args.read_size, input_shape, args.batch_size)
 
     draw_nn = DRAW(read_nn, write_nn, args.num_steps, args.batch_size, args.num_recurrent_units, input_dim,
                    args.latent_dim)
