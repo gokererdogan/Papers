@@ -109,7 +109,7 @@ def test_selective_attention_read():
     attn_params = attn_block._attention_params_layer(nd.concat(h_dec, c_dec, dim=1))
     Fx, Fy = attn_block._build_filter(nd, attn_params)
 
-    read = attn_block(x, err, h_dec, c_dec)
+    read, _ = attn_block(x, err, h_dec, c_dec)
 
     # calculate expected
     expected_x_1 = (np.dot(np.dot(Fx[0].asnumpy(), x[0].asnumpy()), Fy[0].asnumpy().T) *
@@ -142,7 +142,7 @@ def test_selective_attention_write():
     attn_params = attn_block._attention_params_layer(nd.concat(h_dec, c_dec, dim=1))
     Fx, Fy = attn_block._build_filter(nd, attn_params)
 
-    write = attn_block(h_dec, c_dec)
+    write, _ = attn_block(h_dec, c_dec)
 
     # calculate expected
     w = nd.reshape(attn_block._patch_layer(nd.concat(h_dec, c_dec, dim=1)), (-1, 3, 3))
@@ -165,7 +165,7 @@ def test_gradient_wo_attention():
 
     # build the network
     read_nn = NoAttentionRead()
-    write_nn = NoAttentionWrite(units=input_dim)
+    write_nn = NoAttentionWrite(input_dim)
 
     draw_nn = DRAW(read_nn, write_nn, num_steps, batch_size, num_recurrent_units, input_dim,
                    latent_dim)
@@ -181,8 +181,43 @@ def test_gradient_wo_attention():
 
     batch_x = mx.nd.random_uniform(shape=(batch_size, input_dim))
 
-    # NOTE this occasionally fails for initial canvas parameter. I don't know exactly why but the values are still
+    # NOTE this occasionally fails for the first parameter in list. I don't know exactly why but the values are still
     # close.
+    # TODO: investigate why this fails
+    for p in model_params.values():
+        assert check_gradient(fwd, [batch_x], p)
+
+
+def test_gradient_with_attention():
+    ctx = mx.cpu()
+    input_shape = (2, 2)
+    input_dim = 4
+    num_steps = 10
+    latent_dim = 2
+    batch_size = 3
+    num_recurrent_units = 3
+
+    # build the network
+    read_nn = SelectiveAttentionRead(2, input_shape, batch_size)
+    write_nn = SelectiveAttentionWrite(2, input_shape, batch_size)
+
+    draw_nn = DRAW(read_nn, write_nn, num_steps, batch_size, num_recurrent_units, input_dim,
+                   latent_dim)
+    model_params = draw_nn.collect_params()
+    model_params.initialize(init=mx.init.Uniform(1.0), ctx=ctx)
+
+    # loss function
+    loss_fn = DRAWLoss(SigmoidBinaryCrossEntropyLoss(from_sigmoid=False, batch_axis=0), input_dim, latent_dim)
+
+    def fwd(x):
+        y, qs = draw_nn(x)
+        return nd.sum(loss_fn(x, qs, y))
+
+    batch_x = mx.nd.random_uniform(shape=(batch_size, input_dim))
+
+    # NOTE this occasionally fails for first parameter in list. I don't know exactly why but the values are still
+    # close.
+    # TODO: investigate why this fails
     for p in model_params.values():
         assert check_gradient(fwd, [batch_x], p)
 

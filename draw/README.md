@@ -1,10 +1,17 @@
-In progress...
+| ![draw_w_attn_0](../assets/draw_w_attn_0.gif) | ![draw_w_attn_1](../assets/draw_w_attn_1.gif) | ![draw_w_attn_2](../assets/draw_w_attn_2.gif) | ![draw_w_attn_3](../assets/draw_w_attn_3.gif) | ![draw_w_attn_4](../assets/draw_w_attn_4.gif) |
+
+
+
+
+
 
 An [MXNet](https://mxnet.incubator.apache.org/) implementation of the recurrent latent variational autoencoder model DRAW proposed in [1]. 
 
-`core.py` implements the model and loss function. 
+`core.py` implements the model (with and without selective attention) and loss function. This implementation differs from the model presented in the paper in one minor respect: I don't learn the initial canvas. I found that this actually produces less visually appealing results.
 
-`train_mnist.py`trains DRAW on MNIST dataset. Selective attention is **not** implemented yet. 
+`train_mnist.py`trains DRAW on MNIST dataset.  
+
+In the figure above, you see samples from two models, one with attention and another without attention, trained on MNIST with the default parameters (except the model with attention was trained for 500,000 samples instead 1,000,000). Note these are true samples from the model, not the reconstructions for real images in the training or validation sets.
 
 ```
 usage: train_mnist.py [-h] [--batch_size BATCH_SIZE]
@@ -15,7 +22,9 @@ usage: train_mnist.py [-h] [--batch_size BATCH_SIZE]
                       [--learning_rate LEARNING_RATE]
                       [--num_train_samples NUM_TRAIN_SAMPLES]
                       [--num_val_samples NUM_VAL_SAMPLES]
-                      [--val_freq VAL_FREQ] [--gpu]
+                      [--val_freq VAL_FREQ] [--gpu] [--attention]
+                      [--read_size READ_SIZE] [--write_size WRITE_SIZE]
+                      [--logdir LOGDIR]
 
 Train DRAW on MNIST dataset
 
@@ -43,13 +52,18 @@ optional arguments:
                         Validation frequency (run validation every val_freq
                         training samples)
   --gpu                 If True, train on GPU
+  --attention           If True, train with selective attention.
+  --read_size READ_SIZE, -ar READ_SIZE
+                        If True, train with selective attention.
+  --write_size WRITE_SIZE, -aw WRITE_SIZE
+                        If True, train with selective attention.
+  --logdir LOGDIR       Log directory for mxboard.
 ```
 
-This script uses `tensorboard` to plot training/validation metrics. Point `tensorboard` to `results` under this folder.
+This script uses `tensorboard` to plot training/validation metrics. Point `tensorboard` to log directory you specified.
 ```
 tensorboard --logdir=results
 ```
-
 
 [1] K. Gregor, I. Danihelka, A. Graves, D. J. Rezende, and D. Wierstra, “DRAW: A Recurrent Neural Network For Image Generation,” arXiv:1502.04623 [cs], Feb. 2015.
 

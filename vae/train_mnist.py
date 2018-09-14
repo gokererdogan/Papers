@@ -1,18 +1,13 @@
 import argparse
+import os
 
 import mxboard
 import mxnet as mx
 import mxnet.gluon.nn as nn
-import mxnet.ndarray as nd
-import tqdm
-
-from mxnet import autograd
 from mxnet.gluon import Trainer
 from mxnet.gluon.loss import SigmoidBinaryCrossEntropyLoss
-from mxnet.io import DataIter
-from numpy import inf
 
-from common import get_mnist
+from common import get_binarized_mnist, train
 from vae.core import generate_2d_latent_space_image, VAE, VAELoss
 
 
@@ -31,24 +26,9 @@ def parse_args():
     ap.add_argument("--val_freq", '-f', type=int, default=1e4, help="Validation frequency (run validation every "
                                                                     "val_freq training samples)")
     ap.add_argument("--gpu", action='store_true', default=False, help="If True, train on GPU")
+    ap.add_argument("--logdir", type=str, default='results', help='Log directory for mxboard.')
 
     return ap.parse_args()
-
-
-def _get_batch(data_iter: DataIter):
-    """
-    Helper function for getting a batch from a data iterator continuously.
-
-    :param data_iter: Data iterator.
-    :return: Data batch.
-    """
-    try:
-        batch = data_iter.next()
-    except StopIteration:
-        data_iter.reset()
-        batch = data_iter.next()
-
-    return batch
 
 
 if __name__ == "__main__":
@@ -58,7 +38,7 @@ if __name__ == "__main__":
     input_shape = (args.input_height, args.input_width)
     input_dim = args.input_height * args.input_width
 
-    train_iter, val_iter = get_mnist(batch_size=args.batch_size, input_shape=input_shape)
+    train_iter, val_iter = get_binarized_mnist(batch_size=args.batch_size, input_shape=input_shape)
 
     # build the network
     enc_nn = nn.HybridSequential()
@@ -80,59 +60,22 @@ if __name__ == "__main__":
     trainer = Trainer(params=model_params, optimizer='adam',
                       optimizer_params={'learning_rate': args.learning_rate})
 
-    # Training/validation loop
-    sw = mxboard.SummaryWriter(logdir='results')
-    pm = tqdm.tqdm(total=args.num_train_samples)
-
-    remaining = args.num_train_samples
-    last_train_loss = inf
-    last_val_loss = inf
-    while remaining > 0:
-        batch = _get_batch(train_iter)
+    # forward function for training
+    def forward_fn(batch):
         x = batch.data[0].as_in_context(ctx)
+        y, q = vae_nn(x)
+        loss = loss_fn(x, q, y)
+        return loss
 
-        # train step
-        with autograd.record():
-            y, q = vae_nn(x)
-            loss = loss_fn(x, q, y)
-        autograd.backward(loss)
-
-        batch_size = loss.shape[0]
-        trainer.step(batch_size=batch_size)
-
-        remaining -= batch_size
-        last_train_loss = nd.mean(loss).asscalar()  # loss per sample
-        # plot loss
-        sw.add_scalar('Loss', {'Training': last_train_loss}, args.num_train_samples - remaining)
-        pm.update(n=batch_size)
-
-        # validation step
-        if (args.num_train_samples - remaining) % args.val_freq < batch_size:
-            tot_val_loss = 0.0
-            j = args.num_val_samples
-            while j > 0:
-                batch = _get_batch(val_iter)
-                x = batch.data[0].as_in_context(ctx)
-
-                # validation step
-                y, q = vae_nn(x)
-                loss = loss_fn(x, q, y)
-                tot_val_loss += nd.sum(loss).asscalar()
-
-                j -= loss.shape[0]
-
-            last_val_loss = tot_val_loss / (args.num_val_samples - j)  # loss per sample
-            sw.add_scalar('Loss', {'Validation': last_val_loss}, args.num_train_samples - remaining)
-
-        pm.set_postfix({'Train loss': last_train_loss, 'Val loss': last_val_loss})
-
-    pm.close()
-    sw.flush()
+    # train
+    run_id = train(forward_fn, train_iter, val_iter, trainer,
+                   args.num_train_samples, args.num_val_samples, args.val_freq,
+                   args.logdir)
 
     # generate latent space figure if latent dim = 2
+    sw = mxboard.SummaryWriter(logdir=os.path.join(args.logdir, run_id))
     if args.latent_dim == 2:
         img = generate_2d_latent_space_image(vae_nn, val_iter, input_shape, n=20, ctx=ctx)
         sw.add_image('2D_Latent_space', img)
-
     sw.close()
 

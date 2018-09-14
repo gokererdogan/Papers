@@ -8,13 +8,19 @@ An MxNet implementation of the recurrent variational autoencoder described in
 goker erdogan
 https://github.com/gokererdogan
 """
-from typing import Optional, Tuple
+import os
+from math import floor
+from typing import Optional, Tuple, Union
 
+import imageio
 import mxnet as mx
 import mxnet.ndarray as nd
+import numpy as np
+from skimage import transform
 from mxnet.gluon.loss import Loss
 from mxnet.gluon.nn import Dense, HybridBlock
 from mxnet.gluon.rnn import LSTMCell
+
 
 from vae.core import NormalSamplingBlock, VAELoss
 
@@ -30,12 +36,12 @@ class NoAttentionRead(HybridBlock):
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         err = args[0]
-        return F.concat(x, err, dim=1)
+        return F.concat(x, err, dim=1), None
 
 
 class NoAttentionWrite(HybridBlock):
     """
-    Read block with no attention.
+    Write block with no attention.
 
     Section 3.1 in the paper. This is simply a fully connected linear layer.
     """
@@ -51,7 +57,7 @@ class NoAttentionWrite(HybridBlock):
 
     def hybrid_forward(self, F, h_dec, *args, **kwargs):
         c_dec = args[0]
-        return self._write_layer(F.concat(h_dec, c_dec, dim=1))
+        return self._write_layer(F.concat(h_dec, c_dec, dim=1)), None
 
 
 class SelectiveAttentionBase(HybridBlock):
@@ -78,6 +84,10 @@ class SelectiveAttentionBase(HybridBlock):
         with self.name_scope():
             self._attention_params_layer = Dense(units=5)
 
+    @property
+    def filter_size(self):
+        return self._filter_size
+
     def _build_filter(self, F, attn_params):
         # attn params (batch x 5): gx_tilde, gy_tilde, log_var, log_delta_tilde, log_gamma (Eqn. 21)
 
@@ -93,25 +103,26 @@ class SelectiveAttentionBase(HybridBlock):
         # Eqn. 19 and 20.
         mu_vec = F.arange(1, self._filter_size+1) - (self._filter_size / 2.) - 0.5
         # A x N x M
-        mu_x = gx + (delta * F.broadcast_to(nd.expand_dims(nd.expand_dims(mu_vec, axis=1), axis=0),
+        mu_x = gx + (delta * F.broadcast_to(F.expand_dims(F.expand_dims(mu_vec, axis=1), axis=0),
                                             (self._input_shape[0], 0, self._batch_size)))
         # B x N x M
-        mu_y = gy + (delta * F.broadcast_to(nd.expand_dims(nd.expand_dims(mu_vec, axis=1), axis=0),
+        mu_y = gy + (delta * F.broadcast_to(F.expand_dims(F.expand_dims(mu_vec, axis=1), axis=0),
                                             (self._input_shape[1], 0, self._batch_size)))
 
         # Eqn. 25 and 26.
         # A x N x M
-        Fx_grid = nd.broadcast_to(nd.expand_dims(nd.expand_dims(nd.arange(1, self._input_shape[0]+1), axis=1), axis=1),
-                                  (0, self._filter_size, self._batch_size))
+        Fx_grid = F.broadcast_to(F.expand_dims(F.expand_dims(F.arange(1, self._input_shape[0]+1), axis=1), axis=1),
+                                 (0, self._filter_size, self._batch_size))
         Fx = F.softmax(-F.square(Fx_grid - mu_x) / (2. * F.exp(attn_params[:, 2])), axis=0)
         # B x N x M
-        Fy_grid = nd.broadcast_to(nd.expand_dims(nd.expand_dims(nd.arange(1, self._input_shape[1]+1), axis=1), axis=1),
-                                  (0, self._filter_size, self._batch_size))
+        Fy_grid = F.broadcast_to(F.expand_dims(F.expand_dims(F.arange(1, self._input_shape[1]+1), axis=1), axis=1),
+                                 (0, self._filter_size, self._batch_size))
         Fy = F.softmax(-F.square(Fy_grid - mu_y) / (2. * F.exp(attn_params[:, 2])), axis=0)
 
         return F.transpose(Fx), F.transpose(Fy)
 
     def hybrid_forward(self, F, x, *args, **kwargs):
+        # This must return a 2-tuple of (out, attention params)
         raise NotImplemented
 
 
@@ -137,7 +148,7 @@ class SelectiveAttentionRead(SelectiveAttentionBase):
         read_err = F.stack(*[F.dot(F.dot(Fx_i, err_i), Fy_i.T) for
                              Fx_i, err_i, Fy_i in zip(Fx, F.reshape(err, (-1, *self._input_shape)), Fy)], axis=0)
         read = F.exp(attn_params[:, 4:5]) * F.concat(F.flatten(read_x), F.flatten(read_err))
-        return read
+        return read, attn_params
 
 
 class SelectiveAttentionWrite(SelectiveAttentionBase):
@@ -163,7 +174,7 @@ class SelectiveAttentionWrite(SelectiveAttentionBase):
         write = F.stack(*[F.reshape(F.dot(F.dot(Fx_i.T, w_i), Fy_i), (-1,)) for
                           Fx_i, w_i, Fy_i in zip(Fx, F.reshape(w, (-1, self._filter_size, self._filter_size)), Fy)],
                         axis=0) * (1 / F.exp(attn_params[:, 4:5]))
-        return write
+        return write, attn_params
 
 
 class DRAW(HybridBlock):
@@ -171,7 +182,8 @@ class DRAW(HybridBlock):
     DRAW model. A recurrent latent variable model.
     """
     def __init__(self, read_nn: HybridBlock, write_nn: HybridBlock, num_steps: int, batch_size: int,
-                 num_rnn_units: int, input_dim: int, latent_dim: int, prefix: Optional[str] = None):
+                 num_rnn_units: int, input_dim: int, latent_dim: int, ctx: mx.Context = mx.cpu(),
+                 prefix: Optional[str] = None):
         """
         :param read_nn: Read network. This should expect input image, error image, and hidden state of decoder as
             inputs.
@@ -182,6 +194,7 @@ class DRAW(HybridBlock):
         :param input_dim: Input dimensionality (i.e., number of elements in input).
         :param latent_dim: Dimensionality of latent space (i.e., number of elements in latent variable for each
             timestep).
+        :param ctx: Context.
         :param prefix: Prefix for block.
         """
         super().__init__(prefix=prefix)
@@ -191,6 +204,7 @@ class DRAW(HybridBlock):
         self._num_rnn_units = num_rnn_units
         self._input_dim = input_dim
         self._latent_dim = latent_dim
+        self._ctx = ctx
 
         with self.name_scope():
             self._read_layer = read_nn
@@ -200,9 +214,7 @@ class DRAW(HybridBlock):
             self._dec_rnn = LSTMCell(hidden_size=self._num_rnn_units)
             self._write_layer = write_nn
 
-            # learned initial values for canvas and encoder/decoder LSTM hidden states
-            self._canvas_init = self.params.get('canvas', init=mx.init.Uniform(), shape=(1, self._input_dim,))
-
+            # learned initial values for encoder/decoder LSTM hidden states
             self._enc_rnn_h_init = self.params.get('enc_rnn_h_init', init=mx.init.Uniform(),
                                                    shape=(1, self._num_rnn_units))
             self._enc_rnn_c_init = self.params.get('enc_rnn_c_init', init=mx.init.Uniform(),
@@ -213,29 +225,52 @@ class DRAW(HybridBlock):
             self._dec_rnn_c_init = self.params.get('dec_rnn_c_init', init=mx.init.Uniform(),
                                                    shape=(1, self._num_rnn_units))
 
-    def generate(self, n: int = 1) -> nd.NDArray:
-        """
-        Generate n samples from model. See Section 2.3 in paper.
+    @property
+    def read_layer(self):
+        return self._read_layer
 
-        :param n: Number of samples.
-        :return: n x input dim array of generated samples.
-        """
-        with self._canvas_init.data().context:
-            canvas = nd.broadcast_to(self._canvas_init.data(), (n, 0))
-            h_dec = nd.broadcast_to(self._dec_rnn_h_init.data(), (n, 0))
-            c_dec = nd.broadcast_to(self._dec_rnn_c_init.data(), (n, 0))
+    @property
+    def write_layer(self):
+        return self._write_layer
 
-            for i in range(self._num_steps):
-                z = nd.random.normal(shape=(n, self._latent_dim))
-                _, (h_dec, c_dec) = self._dec_rnn(z, [h_dec, c_dec])
-                w = self._write_layer(h_dec, c_dec)
-                canvas = canvas + w
-        return nd.sigmoid(canvas)
+    def generate(self, include_intermediate: bool = False, return_attn_params: bool = False) -> \
+            Union[nd.NDArray, Tuple[nd.NDArray, nd.NDArray]]:
+        """
+        Generate a batch of samples from model. See Section 2.3 in paper.
+
+        :param include_intermediate: If True, samples from all timesteps (not only the last timestep) are returned.
+        :param return_attn_params: If True, returns attention params along with generated samples.
+        :return: n x input dim array of generated samples. If include_intermediate is True, then steps x n x input dim.
+        """
+        canvases = []
+        attn_params = []
+
+        canvas = nd.zeros((self._batch_size, self._input_dim), ctx=self._ctx)
+        h_dec = nd.broadcast_to(self._dec_rnn_h_init.data(), (self._batch_size, 0))
+        c_dec = nd.broadcast_to(self._dec_rnn_c_init.data(), (self._batch_size, 0))
+
+        for i in range(self._num_steps):
+            canvases.append(nd.sigmoid(canvas))
+            z = nd.random.normal(shape=(self._batch_size, self._latent_dim), ctx=self._ctx)
+            _, (h_dec, c_dec) = self._dec_rnn(z, [h_dec, c_dec])
+            w, attn_param = self._write_layer(h_dec, c_dec)
+            attn_params.append(attn_param)
+            canvas = canvas + w
+
+        if include_intermediate:
+            samples = nd.stack(*canvases, axis=0)
+        else:
+            samples = canvases[-1]
+
+        if return_attn_params:
+            return samples, nd.stack(*attn_params, axis=0)
+        else:
+            return samples
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         with x.context:
-            # broadcast learned initial canvas and hidden states to batch size.
-            canvas = F.broadcast_to(self._canvas_init.data(), (self._batch_size, 0))
+            canvas = F.zeros((self._batch_size, self._input_dim), ctx=self._ctx)
+            # broadcast learned hidden states to batch size.
             h_enc = F.broadcast_to(self._enc_rnn_h_init.data(), (self._batch_size, 0))
             c_enc = F.broadcast_to(self._enc_rnn_c_init.data(), (self._batch_size, 0))
             h_dec = F.broadcast_to(self._dec_rnn_h_init.data(), (self._batch_size, 0))
@@ -245,7 +280,7 @@ class DRAW(HybridBlock):
 
             for i in range(self._num_steps):
                 err = x - F.sigmoid(canvas)
-                r = self._read_layer(x, err, h_dec, c_dec)
+                r, _ = self._read_layer(x, err, h_dec, c_dec)
                 _, (h_enc, c_enc) = self._enc_rnn(F.concat(r, h_dec, c_dec, dim=1), [h_enc, c_enc])
 
                 q = self._enc_dense(h_enc)
@@ -253,7 +288,7 @@ class DRAW(HybridBlock):
                 z = self._latent_layer(q)
 
                 _, (h_dec, c_dec) = self._dec_rnn(z, [h_dec, c_dec])
-                w = self._write_layer(h_dec, c_dec)
+                w, _ = self._write_layer(h_dec, c_dec)
                 canvas = canvas + w
 
         # don't pass canvas through sigmoid. loss function takes care of that.
@@ -282,8 +317,126 @@ class DRAWLoss(VAELoss):
         y = args[1]  # batch x features
 
         fit_term = self._fit_loss(y, x) * self._input_dim  # convert avg -> sum by scaling with input dim
-        kl_term = nd.sum(nd.stack(*[self._kl_loss(q) for q in qs], axis=0), axis=0)
+        kl_term = F.sum(F.stack(*[self._kl_loss(q) for q in qs], axis=0), axis=0)
 
         return fit_term + kl_term
+
+
+def _draw_square(image: np.ndarray, center_x: int, center_y: int, width: int, thickness: int):
+    """
+    Draw a red square on image.
+
+    :param image: Image to draw on.
+    :param center_x: Center x (in terms of image height).
+    :param center_y: Center y (in terms of image width).
+    :param width: Width of square.
+    :param thickness: Thickness of borders.
+    :return:
+    """
+    # not the cleanest implementation but it does the job.
+    img_h, img_w, _ = image.shape
+    # top border
+    row_start = floor(center_x - width/2 - thickness/2)
+    row_start = min(max(row_start, 0), img_h)
+    row_end = floor(center_x - width/2 + thickness/2)
+    row_end = min(max(row_end, 0), img_h)
+
+    col_start = floor(center_y - width/2 - thickness/2)
+    col_start = min(max(col_start, 0), img_w)
+    col_end = floor(center_y + width/2 + thickness/2)
+    col_end = min(max(col_end, 0), img_w)
+
+    image[row_start:row_end, col_start:col_end, 0] = 255
+
+    # bottom border
+    row_start = floor(center_x + width/2 - thickness/2)
+    row_start = min(max(row_start, 0), img_h)
+    row_end = floor(center_x + width/2 + thickness/2)
+    row_end = min(max(row_end, 0), img_h)
+
+    col_start = floor(center_y - width/2 - thickness/2)
+    col_start = min(max(col_start, 0), img_w)
+    col_end = floor(center_y + width/2 + thickness/2)
+    col_end = min(max(col_end, 0), img_w)
+
+    image[row_start:row_end, col_start:col_end, 0] = 255
+
+    # left border
+    row_start = floor(center_x - width/2 - thickness/2)
+    row_start = min(max(row_start, 0), img_h)
+    row_end = floor(center_x + width/2 + thickness/2)
+    row_end = min(max(row_end, 0), img_h)
+
+    col_start = floor(center_y - width/2 - thickness/2)
+    col_start = min(max(col_start, 0), img_w)
+    col_end = floor(center_y - width/2 + thickness/2)
+    col_end = min(max(col_end, 0), img_w)
+
+    image[row_start:row_end, col_start:col_end, 0] = 255
+
+    # right border
+    row_start = floor(center_x - width/2 - thickness/2)
+    row_start = min(max(row_start, 0), img_h)
+    row_end = floor(center_x + width/2 + thickness/2)
+    row_end = min(max(row_end, 0), img_h)
+
+    col_start = floor(center_y + width/2 - thickness/2)
+    col_start = min(max(col_start, 0), img_w)
+    col_end = floor(center_y + width/2 + thickness/2)
+    col_end = min(max(col_end, 0), img_w)
+
+    image[row_start:row_end, col_start:col_end, 0] = 255
+
+    return image
+
+
+def generate_sampling_gif(draw_nn: DRAW, image_shape: Tuple[int, int], save_path: str, save_prefix: str,
+                          draw_attention: bool = False, scale_factor: float = 1.):
+    """
+    Generate animations of sampling from the given model.
+
+    :param draw_nn: Trained DRAW model.
+    :param image_shape: HxW of image.
+    :param save_path: Path to save gif files in.
+    :param save_prefix: Prefix for gif filenames.
+    :param draw_attention: If True, draws attention boxes on images. Available only if the model has selective
+        attention.
+    :param scale_factor: Scale images by this factor.
+    :return:
+    """
+    samples = draw_nn.generate(include_intermediate=True, return_attn_params=draw_attention)
+    if draw_attention:
+        samples, attn_params = samples
+        attn_params = attn_params.asnumpy().transpose((1, 0, 2))
+    # convert samples to images
+    samples = samples.asnumpy().transpose((1, 0, 2))  # batch x steps x feats
+    samples = samples.reshape(samples.shape[0:2] + image_shape)  # batch x steps x h x w
+    samples = (samples * 255).astype(np.uint8)
+    samples = np.tile(samples[:, :, :, :, None], (1, 1, 1, 1, 3))  # to rgb
+
+    if draw_attention:
+        larger_dim = image_shape[0] if image_shape[0] > image_shape[1] else image_shape[1]
+        gx = ((image_shape[0] + 1.) / 2) * (attn_params[:, :, 0] + 1)
+        gy = ((image_shape[1] + 1.) / 2) * (attn_params[:, :, 1] + 1)
+        delta = ((larger_dim - 1) / (draw_nn.write_layer.filter_size - 1)) * np.exp(attn_params[:, :, 3])
+        variance = np.exp(attn_params[:, :, 2])
+
+    for i, sample in enumerate(samples):
+        scaled_samples = []
+        file_path = os.path.join(save_path, "{}_{}.gif".format(save_prefix, i))
+        for t, sample_t in enumerate(sample):
+            if draw_attention:
+                if t > 0:  # skip initial canvas
+                    # note it makes more sense to plot the attention window onto the image after write operation
+                    # that's why we use t-1 below
+                    _draw_square(image=sample_t, center_x=int(gx[i, t-1]), center_y=int(gy[i, t-1]),
+                                 width=int(2 * delta[i, t-1]),
+                                 thickness=int(0.06 * variance[i, t-1] + 1))  # determined heuristically
+            # rescale image
+            scaled_samples.append(transform.rescale(sample_t, scale=scale_factor, anti_aliasing=True, multichannel=True,
+                                  preserve_range=True).astype(np.uint8))
+
+        imageio.mimwrite(file_path, scaled_samples, duration=0.1)
+
 
 
