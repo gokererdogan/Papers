@@ -1,4 +1,4 @@
-![2D_latent_space](./results/2D_latent_space.png)
+![2D_latent_space](../assets/2D_latent_space.png)
 
 
 

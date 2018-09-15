@@ -2,7 +2,7 @@ This repository contains [MXNet](https://mxnet.incubator.apache.org/) implementa
 
 Currently, I have
 - [Variational autoencoder](vae/) from [1] (Completed)
-- [DRAW](draw/) from [2] (In progress)
+- [DRAW](draw/) from [2] (Completed)
 
 See the README file under its folder for instructions on running a model.
 

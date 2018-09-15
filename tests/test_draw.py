@@ -181,9 +181,8 @@ def test_gradient_wo_attention():
 
     batch_x = mx.nd.random_uniform(shape=(batch_size, input_dim))
 
-    # NOTE this occasionally fails for the first parameter in list. I don't know exactly why but the values are still
-    # close.
-    # TODO: investigate why this fails
+    # TODO: investigate why this fails if we remove the following fwd call.
+    fwd(batch_x)
     for p in model_params.values():
         assert check_gradient(fwd, [batch_x], p)
 
@@ -215,9 +214,9 @@ def test_gradient_with_attention():
 
     batch_x = mx.nd.random_uniform(shape=(batch_size, input_dim))
 
-    # NOTE this occasionally fails for first parameter in list. I don't know exactly why but the values are still
-    # close.
-    # TODO: investigate why this fails
+    # TODO: investigate why this fails for the first parameters if fwd is not called once before check gradient is
+    # called
+    fwd(batch_x)
     for p in model_params.values():
         assert check_gradient(fwd, [batch_x], p)
 

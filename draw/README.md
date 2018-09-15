@@ -1,4 +1,9 @@
-| ![draw_w_attn_0](../assets/draw_w_attn_0.gif) | ![draw_w_attn_1](../assets/draw_w_attn_1.gif) | ![draw_w_attn_2](../assets/draw_w_attn_2.gif) | ![draw_w_attn_3](../assets/draw_w_attn_3.gif) | ![draw_w_attn_4](../assets/draw_w_attn_4.gif) |
+
+
+|                                                 |                                                 |                                                 |                                                 |                                                 |
+| ----------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- |
+| ![draw_wo_attn_0](../assets/draw_wo_attn_0.gif) | ![draw_wo_attn_1](../assets/draw_wo_attn_1.gif) | ![draw_wo_attn_2](../assets/draw_wo_attn_2.gif) | ![draw_wo_attn_3](../assets/draw_wo_attn_3.gif) | ![draw_wo_attn_4](../assets/draw_wo_attn_4.gif) |
+| ![draw_wo_attn_5](../assets/draw_wo_attn_5.gif) | ![draw_wo_attn_6](../assets/draw_wo_attn_6.gif) | ![draw_wo_attn_7](../assets/draw_wo_attn_7.gif) | ![draw_wo_attn_8](../assets/draw_wo_attn_8.gif) | ![draw_wo_attn_9](../assets/draw_wo_attn_9.gif) |
 
 
 
@@ -11,7 +16,7 @@ An [MXNet](https://mxnet.incubator.apache.org/) implementation of the recurrent 
 
 `train_mnist.py`trains DRAW on MNIST dataset.  
 
-In the figure above, you see samples from two models, one with attention and another without attention, trained on MNIST with the default parameters (except the model with attention was trained for 500,000 samples instead 1,000,000). Note these are true samples from the model, not the reconstructions for real images in the training or validation sets.
+In the figure above, you see samples from two models, one with attention and another without attention, trained on MNIST with the default parameters (for 500,000 training samples instead 1,000,000). Note these are true samples from the model, not the reconstructions for real images in the training or validation sets.
 
 ```
 usage: train_mnist.py [-h] [--batch_size BATCH_SIZE]

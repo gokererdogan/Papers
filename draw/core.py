@@ -233,11 +233,19 @@ class DRAW(HybridBlock):
     def write_layer(self):
         return self._write_layer
 
-    def generate(self, include_intermediate: bool = False, return_attn_params: bool = False) -> \
+    def generate(self, x: nd.NDArray = None, include_intermediate: bool = False, return_attn_params: bool = False) -> \
             Union[nd.NDArray, Tuple[nd.NDArray, nd.NDArray]]:
         """
         Generate a batch of samples from model. See Section 2.3 in paper.
 
+        If x is None, this method generates unconditional samples from the model (as explained in Section 2.3 in the
+        paper).
+
+        If x is provided, this method reconstructs the input to generate the sample. This is not really a true sample
+        from the model because the model looks at the image it is trying to generate. However, this is useful for seeing
+        how the model generates a particular image. (I believe this is how the figures in the paper are generated.)
+
+        :param x: Input to generate images from. This is not really an unconditional sample from the model. This is
         :param include_intermediate: If True, samples from all timesteps (not only the last timestep) are returned.
         :param return_attn_params: If True, returns attention params along with generated samples.
         :return: n x input dim array of generated samples. If include_intermediate is True, then steps x n x input dim.
@@ -249,9 +257,23 @@ class DRAW(HybridBlock):
         h_dec = nd.broadcast_to(self._dec_rnn_h_init.data(), (self._batch_size, 0))
         c_dec = nd.broadcast_to(self._dec_rnn_c_init.data(), (self._batch_size, 0))
 
+        if x is not None:
+            h_enc = nd.broadcast_to(self._enc_rnn_h_init.data(), (self._batch_size, 0))
+            c_enc = nd.broadcast_to(self._enc_rnn_c_init.data(), (self._batch_size, 0))
+
         for i in range(self._num_steps):
             canvases.append(nd.sigmoid(canvas))
-            z = nd.random.normal(shape=(self._batch_size, self._latent_dim), ctx=self._ctx)
+
+            if x is not None:
+                err = x - nd.sigmoid(canvas)
+                r, _ = self._read_layer(x, err, h_dec, c_dec)
+                _, (h_enc, c_enc) = self._enc_rnn(nd.concat(r, h_dec, c_dec, dim=1), [h_enc, c_enc])
+
+                q = self._enc_dense(h_enc)
+                z = self._latent_layer(q)
+            else:
+                z = nd.random.normal(shape=(self._batch_size, self._latent_dim), ctx=self._ctx)
+
             _, (h_dec, c_dec) = self._dec_rnn(z, [h_dec, c_dec])
             w, attn_param = self._write_layer(h_dec, c_dec)
             attn_params.append(attn_param)
@@ -391,7 +413,7 @@ def _draw_square(image: np.ndarray, center_x: int, center_y: int, width: int, th
 
 
 def generate_sampling_gif(draw_nn: DRAW, image_shape: Tuple[int, int], save_path: str, save_prefix: str,
-                          draw_attention: bool = False, scale_factor: float = 1.):
+                          from_x: nd.NDArray = None, draw_attention: bool = False, scale_factor: float = 1.):
     """
     Generate animations of sampling from the given model.
 
@@ -399,12 +421,13 @@ def generate_sampling_gif(draw_nn: DRAW, image_shape: Tuple[int, int], save_path
     :param image_shape: HxW of image.
     :param save_path: Path to save gif files in.
     :param save_prefix: Prefix for gif filenames.
+    :param from_x: If provided, generate reconstructions of these images.
     :param draw_attention: If True, draws attention boxes on images. Available only if the model has selective
         attention.
     :param scale_factor: Scale images by this factor.
     :return:
     """
-    samples = draw_nn.generate(include_intermediate=True, return_attn_params=draw_attention)
+    samples = draw_nn.generate(from_x, include_intermediate=True, return_attn_params=draw_attention)
     if draw_attention:
         samples, attn_params = samples
         attn_params = attn_params.asnumpy().transpose((1, 0, 2))
