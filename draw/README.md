@@ -1,13 +1,8 @@
 
 
-|                                                 |                                                 |                                                 |                                                 |                                                 |
-| ----------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- |
-| ![draw_wo_attn_0](../assets/draw_wo_attn_0.gif) | ![draw_wo_attn_1](../assets/draw_wo_attn_1.gif) | ![draw_wo_attn_2](../assets/draw_wo_attn_2.gif) | ![draw_wo_attn_3](../assets/draw_wo_attn_3.gif) | ![draw_wo_attn_4](../assets/draw_wo_attn_4.gif) |
-| ![draw_wo_attn_5](../assets/draw_wo_attn_5.gif) | ![draw_wo_attn_6](../assets/draw_wo_attn_6.gif) | ![draw_wo_attn_7](../assets/draw_wo_attn_7.gif) | ![draw_wo_attn_8](../assets/draw_wo_attn_8.gif) | ![draw_wo_attn_9](../assets/draw_wo_attn_9.gif) |
-
-
-
-
+|  Without  | ![draw_wo_attn_0](../assets/draw_wo_attn_0.gif) | ![draw_wo_attn_1](../assets/draw_wo_attn_1.gif) | ![draw_wo_attn_2](../assets/draw_wo_attn_2.gif) | ![draw_wo_attn_3](../assets/draw_wo_attn_3.gif) | ![draw_wo_attn_4](../assets/draw_wo_attn_4.gif) |   With    | ![draw_w_attn_0](../assets/draw_w_attn_0.gif) | ![draw_w_attn_1](../assets/draw_w_attn_1.gif) | ![draw_w_attn_2](../assets/draw_w_attn_2.gif) |![draw_w_attn_3](../assets/draw_w_attn_3.gif) | ![draw_w_attn_4](../assets/draw_w_attn_4.gif) |
+|  attention  | ![draw_wo_attn_5](../assets/draw_wo_attn_5.gif) | ![draw_wo_attn_6](../assets/draw_wo_attn_6.gif) | ![draw_wo_attn_7](../assets/draw_wo_attn_7.gif) | ![draw_wo_attn_8](../assets/draw_wo_attn_8.gif) | ![draw_wo_attn_9](../assets/draw_wo_attn_9.gif) |   attention    | ![draw_w_attn_5](../assets/draw_w_attn_5.gif) | ![draw_w_attn_6](../assets/draw_w_attn_6.gif) | ![draw_w_attn_7](../assets/draw_w_attn_7.gif) |![draw_w_attn_8](../assets/draw_w_attn_8.gif) | ![draw_w_attn_9](../assets/draw_w_attn_9.gif) |
+**Samples from models with and without attention**
 
 
 An [MXNet](https://mxnet.incubator.apache.org/) implementation of the recurrent latent variational autoencoder model DRAW proposed in [1]. 
