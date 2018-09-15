@@ -8,6 +8,7 @@
 
 
 
+
 An [MXNet](https://mxnet.incubator.apache.org/) implementation of the recurrent latent variational autoencoder model DRAW proposed in [1]. 
 
 `core.py` implements the model (with and without selective attention) and loss function. This implementation differs from the model presented in the paper in one minor respect: I don't learn the initial canvas. I found that this actually produces less visually appealing results.
