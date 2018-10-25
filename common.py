@@ -1,6 +1,7 @@
 from time import strftime
 from typing import List, Callable, Tuple
 import os
+from pathlib import Path
 
 import mxboard
 import mxnet as mx
@@ -10,6 +11,8 @@ import tqdm
 from mxnet import autograd
 from mxnet.gluon import Parameter, Trainer, HybridBlock
 from mxnet.test_utils import get_mnist_ubyte
+
+DATA_FOLDER_PATH = Path(__file__).parent / 'data'
 
 
 class BinarizedMNISTIter(mx.io.DataIter):
@@ -33,24 +36,38 @@ get_mnist = mx.test_utils.get_mnist_iterator
 
 
 def get_binarized_mnist(batch_size, input_shape):
-    """Returns training and validation iterators for binarized MNIST dataset
+    """
+    Returns training and validation iterators for binarized MNIST dataset
     """
     get_mnist_ubyte()
     flat = False if len(input_shape) == 3 else True
 
     train_dataiter = BinarizedMNISTIter(
-        image="data/train-images-idx3-ubyte",
-        label="data/train-labels-idx1-ubyte",
+        image=str(DATA_FOLDER_PATH / "train-images-idx3-ubyte"),
+        label=str(DATA_FOLDER_PATH / "train-labels-idx1-ubyte"),
         input_shape=input_shape,
         batch_size=batch_size,
         flat=flat)
 
     val_dataiter = BinarizedMNISTIter(
-        image="data/t10k-images-idx3-ubyte",
-        label="data/t10k-labels-idx1-ubyte",
+        image=str(DATA_FOLDER_PATH / "t10k-images-idx3-ubyte"),
+        label=str(DATA_FOLDER_PATH / "t10k-labels-idx1-ubyte"),
         input_shape=input_shape,
         batch_size=batch_size,
         flat=flat)
+
+    return train_dataiter, val_dataiter
+
+
+def get_omniglot(batch_size):
+    """
+    Returns training and validation data iterators for the Omniglot dataset.
+    """
+    train_file = Path(DATA_FOLDER_PATH / 'omniglot_train_img.npy')
+    train_dataiter = mx.io.NDArrayIter(np.load(str(train_file)), batch_size=batch_size, shuffle=True)
+
+    val_file = Path(DATA_FOLDER_PATH / 'omniglot_test_img.npy')
+    val_dataiter = mx.io.NDArrayIter(np.load(str(val_file)), batch_size=batch_size, shuffle=True)
 
     return train_dataiter, val_dataiter
 

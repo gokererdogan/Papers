@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import argparse
 
 import mxnet as mx
@@ -13,8 +15,8 @@ def parse_args():
     ap = argparse.ArgumentParser(description="Train DRAW on MNIST dataset")
     ap.add_argument("--batch_size", '-b', type=int, default=128, help="Batch size")
     ap.add_argument("--input_height", '-hh', type=int, default=28, help="Height of input image")
-    ap.add_argument("--input_width", '-ww', type=int, default=28, help="Height of input image")
-    ap.add_argument("--num_steps", '-s', type=int, default=64, help="Height of input image")
+    ap.add_argument("--input_width", '-ww', type=int, default=28, help="Width of input image")
+    ap.add_argument("--num_steps", '-s', type=int, default=64, help="Number of recurrent steps")
     ap.add_argument("--num_recurrent_units", '-u', type=int, default=256, help="Number of units in recurrent encoder "
                                                                                "and decoder")
     ap.add_argument("--latent_dim", '-l', type=int, default=10, help="Latent space dimension (number of elements)")
