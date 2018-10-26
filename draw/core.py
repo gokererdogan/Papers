@@ -326,7 +326,7 @@ class DRAWLoss(VAELoss):
     def __init__(self, fit_loss: Loss, input_dim: int, latent_dim: int):
         """
         :param fit_loss: Loss used for p(x|z), i.e., reconstruction loss.
-            1. Note the output of VAE is not passed through sigmoid. Make sure the loss function expects that (by
+            1. Note the output of DRAW is not passed through sigmoid. Make sure the loss function expects that (by
                passing from_sigmoid=False when applicable).
             2. We assume that the loss function averages over (input/output) features, rather than summing.
         :param input_dim: Input dimensionality.

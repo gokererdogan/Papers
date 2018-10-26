@@ -47,7 +47,7 @@ class VAELossKLTerm(Loss):
     KL term in variational lower bound used for training variational autoencoder.
 
     First term in Eqn. 10 in the paper.
-    Note we return the negative KL so it we would like to minimize the sum of this with the fit term.
+    Note we return the positive KL so we would like to minimize the sum of this with the fit term.
     """
     def __init__(self, latent_dim: int):
         """
@@ -63,11 +63,11 @@ class VAELossKLTerm(Loss):
         log_sd = q[:, self._latent_dim:]
 
         # first term in Eq. 10. acts as a
-        kl_term = 0.5 * (self._latent_dim + F.sum(2. * log_sd, axis=0, exclude=True) -
-                         F.sum(F.square(mu), axis=0, exclude=True) -
+        kl_term = 0.5 * (-self._latent_dim - F.sum(2. * log_sd, axis=0, exclude=True) +
+                         F.sum(F.square(mu), axis=0, exclude=True) +
                          F.sum(F.exp(2. * log_sd), axis=0, exclude=True))
 
-        return -kl_term  # note the minus sign
+        return kl_term
 
 
 class VAELoss(Loss):

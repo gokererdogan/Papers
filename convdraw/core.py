@@ -13,10 +13,79 @@ from typing import Optional, Tuple
 import mxnet as mx
 import mxnet.ndarray as nd
 from mxnet.gluon.contrib.rnn import Conv2DLSTMCell
+from mxnet.gluon.loss import Loss
 from mxnet.gluon.nn import Dense, HybridBlock
 
 from draw.core import generate_sampling_gif as draw_generate_sampling_gif
 from vae.core import NormalSamplingBlock
+
+
+class ConvDrawLossKLTerm(Loss):
+    """
+    KL term in variational lower bound used for training ConvDraw.
+
+    This is essentially the KL-divergence between two diagonal multivariate Gaussians.
+    """
+    def __init__(self, latent_dim: int):
+        """
+        :param latent_dim: Dimensionality of latent space.
+        """
+        super().__init__(weight=1, batch_axis=0)
+
+        self._latent_dim = latent_dim
+
+    def hybrid_forward(self, F, q, *args, **kwargs):
+        p = args[0]
+        # q and p are batches x latent space * 2 [mu, log_sd]
+        mu_q = q[:, 0:self._latent_dim]
+        mu_p = p[:, 0:self._latent_dim]
+        log_sd_q = q[:, self._latent_dim:]
+        log_sd_p = p[:, self._latent_dim:]
+
+        # first term in Eq. 10. acts as a
+        kl_term = 0.5 * (-self._latent_dim + F.sum(2. * log_sd_p, axis=0, exclude=True) -
+                         F.sum(2. * log_sd_q, axis=0, exclude=True) +
+                         F.sum(F.square((mu_q - mu_p) / F.exp(log_sd_p)), axis=0, exclude=True) +
+                         F.sum(F.exp(2. * (log_sd_q - log_sd_p)), axis=0, exclude=True))
+
+        return kl_term
+
+
+class ConvDRAWLoss(Loss):
+    """
+    Negative variational lower bound used for training ConvDRAW.
+
+    See Eq. 11 in the paper.
+    """
+    def __init__(self, fit_loss: Loss, input_dim: int, latent_dim: int, input_cost_scale: float = 1.0):
+        """
+        :param fit_loss: Loss used for p(x|z), i.e., reconstruction loss. Note the output of VAE is not passed through
+            sigmoid. We assume that the loss function averages over (input/output) features, rather than summing.
+        :param input_dim: Input dimensionality.
+        :param latent_dim: Dimensionality of latent space
+        """
+        super().__init__(weight=1, batch_axis=0)
+
+        assert 0. < input_cost_scale <= 1.0, "Input cost scale must be in (0, 1]"
+        self._input_dim = input_dim
+        self._latent_dim = latent_dim
+        self._input_cost_scale = input_cost_scale
+
+        with self.name_scope():
+            self._fit_loss = fit_loss
+            self._kl_loss = ConvDrawLossKLTerm(latent_dim)
+
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        # x: input, args[0]: latent prob. distribution, args[1]: latent prior prob. distribution,
+        # args[2]: output of VAE (before sigmoid)
+        qs = args[0]  # steps x batch x latent
+        ps = args[1]  # steps x batch x latent
+        y = args[2]  # batch x features
+
+        fit_term = self._fit_loss(y, x) * self._input_dim  # convert avg -> sum by scaling with input dim
+        kl_term = F.sum(F.stack(*[self._kl_loss(q, p) for q, p in zip(qs, ps)], axis=0), axis=0)
+
+        return (self._input_cost_scale * fit_term) + kl_term
 
 
 class ConvDRAW(HybridBlock):
@@ -174,34 +243,6 @@ class ConvDRAW(HybridBlock):
 
         # don't pass reconstruction through sigmoid. loss function takes care of that.
         return r, nd.stack(*qs, axis=0), nd.stack(*ps, axis=0)  # qs and ps: steps x batch x latent
-
-#
-# class ConvDRAWLoss(VAELoss):
-#     """
-#     TODO: implement this
-#     Loss function for ConvDRAW model.
-#
-#     This is basically VAE loss with multiple latent variables. See Eqns. 9, 10, 11, and 12 in the paper.
-#     """
-#     def __init__(self, fit_loss: Loss, input_dim: int, latent_dim: int):
-#         """
-#         :param fit_loss: Loss used for p(x|z), i.e., reconstruction loss.
-#             1. Note the output of VAE is not passed through sigmoid. Make sure the loss function expects that (by
-#                passing from_sigmoid=False when applicable).
-#             2. We assume that the loss function averages over (input/output) features, rather than summing.
-#         :param input_dim: Input dimensionality.
-#         :param latent_dim: Dimensionality of latent space
-#         """
-#         super().__init__(fit_loss, input_dim, latent_dim)
-#
-#     def hybrid_forward(self, F, x, *args, **kwargs):
-#         qs = args[0]  # steps x batch x latent
-#         y = args[1]  # batch x features
-#
-#         fit_term = self._fit_loss(y, x) * self._input_dim  # convert avg -> sum by scaling with input dim
-#         kl_term = F.sum(F.stack(*[self._kl_loss(q) for q in qs], axis=0), axis=0)
-#
-#         return fit_term + kl_term
 
 
 def generate_sampling_gif(conv_draw_nn: ConvDRAW, image_shape: Tuple[int, int], save_path: str, save_prefix: str,
