@@ -195,6 +195,18 @@ def train(forward_fn: Callable[[mx.io.DataBatch], nd.NDArray], train_iter: mx.io
 
         pm.set_postfix({'Train loss': last_train_loss, 'Val loss': last_val_loss})
 
+    # calculate loss on the whole validation set
+    tot_val_loss = 0.0
+    j = 0
+    for batch in val_iter:
+        loss = forward_fn(batch)
+        tot_val_loss += nd.sum(loss).asscalar()
+        j += loss.shape[0]
+
+    last_val_loss = tot_val_loss / j  # loss per sample
+    sw.add_scalar('Loss', {'Validation_final': last_val_loss}, samples_processed)
+    pm.set_postfix({'Train loss': last_train_loss, 'Val loss': last_val_loss})
+
     pm.close()
     sw.flush()
     sw.close()

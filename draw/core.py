@@ -428,6 +428,9 @@ def generate_sampling_gif(draw_nn: DRAW, image_shape: Union[Tuple[int, int], Tup
     :param scale_factor: Scale images by this factor.
     :return:
     """
+    if len(image_shape) == 3:
+        assert image_shape[0] == 1 or image_shape[0] == 3, "Image must be grayscale or RGB."
+
     samples = draw_nn.generate(from_x, include_intermediate=True, return_attn_params=draw_attention)
     if draw_attention:
         samples, attn_params = samples
@@ -436,7 +439,17 @@ def generate_sampling_gif(draw_nn: DRAW, image_shape: Union[Tuple[int, int], Tup
     samples = samples.asnumpy().swapaxes(0, 1)  # batch x steps x feats
     samples = samples.reshape(samples.shape[0:2] + image_shape)  # batch x steps x h x w
     samples = (samples * 255).astype(np.uint8)
-    samples = np.tile(samples[:, :, :, :, None], (1, 1, 1, 1, 3))  # to rgb
+
+    if len(image_shape) == 3 and image_shape[0] == 1:  # has channels dimension, but there is a single channel
+        # get rid of that dimension, so we can treat this as a (2D) grayscale image
+        samples = samples[:, :, 0, :, :]
+        image_shape = image_shape[1:]
+
+    if len(image_shape) == 2:
+        samples = np.tile(samples[:, :, :, :, None], (1, 1, 1, 1, 3))  # to rgb
+    elif len(image_shape) == 3:
+        # transpose CxHxW to HxWxC
+        samples = samples.transpose((0, 1, 3, 4, 2))
 
     if draw_attention:
         larger_dim = image_shape[0] if image_shape[0] > image_shape[1] else image_shape[1]

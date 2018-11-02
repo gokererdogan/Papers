@@ -12,18 +12,18 @@ from convdraw.core import ConvDRAW, ConvDRAWLoss, generate_sampling_gif
 
 def build_encoder_nn():
     net = nn.HybridSequential()
-    net.add(nn.Conv2D(channels=16, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 14x14
-    net.add(nn.Conv2D(channels=32, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 7x7
-    net.add(nn.Conv2D(channels=32, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 4x4
-    net.add(nn.Conv2D(channels=32, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 2x2
-    return net, (32, 2, 2)
+    net.add(nn.Conv2D(channels=32, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 14x14
+    net.add(nn.Conv2D(channels=64, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 7x7
+    net.add(nn.Conv2D(channels=128, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 4x4
+    net.add(nn.Conv2D(channels=128, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 2x2
+    return net, (128, 2, 2)
 
 
 def build_decoder_nn():
     net = nn.HybridSequential()
-    net.add(nn.Conv2DTranspose(channels=32, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 3x3
-    net.add(nn.Conv2DTranspose(channels=32, kernel_size=(3, 3), strides=(2, 2)))  # 7x7
-    net.add(nn.Conv2DTranspose(channels=16, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 13x13
+    net.add(nn.Conv2DTranspose(channels=128, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 3x3
+    net.add(nn.Conv2DTranspose(channels=64, kernel_size=(3, 3), strides=(2, 2)))  # 7x7
+    net.add(nn.Conv2DTranspose(channels=32, kernel_size=(3, 3), strides=(2, 2), padding=(1, 1)))  # 13x13
     net.add(nn.Conv2DTranspose(channels=1, kernel_size=(4, 4), strides=(2, 2)))  # 28x28
     return net
 
@@ -32,12 +32,12 @@ def parse_args():
     ap = argparse.ArgumentParser(description="Train ConvDRAW on Omniglot dataset")
     ap.add_argument("--batch_size", '-b', type=int, default=128, help="Batch size")
     ap.add_argument("--num_steps", '-s', type=int, default=32, help="Number of recurrent steps")
-    ap.add_argument("--latent_dim", '-l', type=int, default=16, help="Latent space dimension (number of elements)")
-    ap.add_argument("--num_recurrent_maps", '-u', type=int, default=64, help="Number of feature maps in recurrent "
-                                                                             "encoder and decoder")
-    ap.add_argument("--learning_rate", '-r', type=float, default=1e-3, help="Learning rate")
-    ap.add_argument("--num_train_samples", '-t', type=int, default=1e6, help="Number of training samples")
-    ap.add_argument("--num_val_samples", '-v', type=int, default=256, help="Number of validation samples "
+    ap.add_argument("--latent_dim", '-l', type=int, default=32, help="Latent space dimension (number of elements)")
+    ap.add_argument("--num_recurrent_maps", '-u', type=int, default=128, help="Number of feature maps in recurrent "
+                                                                              "encoder and decoder")
+    ap.add_argument("--learning_rate", '-r', type=float, default=5e-4, help="Learning rate")
+    ap.add_argument("--num_train_samples", '-t', type=int, default=2e6, help="Number of training samples")
+    ap.add_argument("--num_val_samples", '-v', type=int, default=512, help="Number of validation samples "
                                                                            "(per validation run)")
     ap.add_argument("--val_freq", '-f', type=int, default=1e4, help="Validation frequency (run validation every "
                                                                     "val_freq training samples)")

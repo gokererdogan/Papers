@@ -8,13 +8,17 @@ An MxNet implementation of the convolutional recurrent variational autoencoder d
 goker erdogan
 https://github.com/gokererdogan
 """
+import os
 from typing import Optional, Tuple, Union
 
+import imageio
 import mxnet as mx
+import numpy as np
 import mxnet.ndarray as nd
 from mxnet.gluon.contrib.rnn import Conv2DLSTMCell
 from mxnet.gluon.loss import Loss
 from mxnet.gluon.nn import Dense, HybridBlock
+from skimage import transform
 
 from draw.core import generate_sampling_gif as draw_generate_sampling_gif
 from vae.core import NormalSamplingBlock
@@ -243,7 +247,7 @@ class ConvDRAW(HybridBlock):
 def generate_sampling_gif(conv_draw_nn: ConvDRAW, image_shape: Tuple[int, int, int], save_path: str, save_prefix: str,
                           from_x: nd.NDArray = None, scale_factor: float = 1.):
     """
-    Generate animations of sampling from the given model.
+    Generate animations of sampling from the given model and save them to disk.
 
     :param conv_draw_nn: Trained ConvDRAW model.
     :param image_shape: HxW of image.
@@ -255,3 +259,32 @@ def generate_sampling_gif(conv_draw_nn: ConvDRAW, image_shape: Tuple[int, int, i
     """
     return draw_generate_sampling_gif(conv_draw_nn, image_shape, save_path, save_prefix,
                                       from_x=from_x, draw_attention=False, scale_factor=scale_factor)
+
+
+def generate_samples(conv_draw_nn: ConvDRAW, image_shape: Tuple[int, int, int], save_path: str, save_prefix: str,
+                     scale_factor: float = 1.):
+    """
+    Generate samples and save them to disk.
+
+    :param conv_draw_nn: Trained ConvDRAW model.
+    :param image_shape: HxW of image.
+    :param save_path: Path to save gif files in.
+    :param save_prefix: Prefix for gif filenames.
+    :param scale_factor: Scale images by this factor.
+    :return:
+    """
+    samples = conv_draw_nn.generate(None, include_intermediate=False)
+
+    # convert samples to binary images (flip black and white)
+    samples = ((samples.asnumpy() < 0.5) * 255).astype(np.uint8)
+    samples = samples.transpose((0, 2, 3, 1))  # from CxHxW to HxWxC
+    if image_shape[0] == 1:
+        samples = np.tile(samples, (1, 1, 1, 3))  # to rgb
+
+    for i, sample in enumerate(samples):
+        file_path = os.path.join(save_path, "{}_{}.png".format(save_prefix, i))
+        # rescale image
+        scaled_sample = transform.rescale(sample, scale=scale_factor, anti_aliasing=True, multichannel=True,
+                                          preserve_range=True).astype(np.uint8)
+
+        imageio.imwrite(file_path, scaled_sample)
