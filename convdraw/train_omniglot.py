@@ -3,10 +3,11 @@
 import argparse
 
 import mxnet as mx
-from mxnet.gluon import nn
+from mxnet.gluon import nn, Trainer
+from mxnet.gluon.loss import SigmoidBinaryCrossEntropyLoss
 
-from common import get_omniglot
-from convdraw.core import ConvDRAW
+from common import get_omniglot, PlotGradientHistogram, PlotGenerateImage, train
+from convdraw.core import ConvDRAW, ConvDRAWLoss, generate_sampling_gif
 
 
 def build_encoder_nn():
@@ -33,7 +34,7 @@ def parse_args():
     ap.add_argument("--num_steps", '-s', type=int, default=32, help="Number of recurrent steps")
     ap.add_argument("--latent_dim", '-l', type=int, default=16, help="Latent space dimension (number of elements)")
     ap.add_argument("--num_recurrent_maps", '-u', type=int, default=64, help="Number of feature maps in recurrent "
-                                                                              "encoder and decoder")
+                                                                             "encoder and decoder")
     ap.add_argument("--learning_rate", '-r', type=float, default=1e-3, help="Learning rate")
     ap.add_argument("--num_train_samples", '-t', type=int, default=1e6, help="Number of training samples")
     ap.add_argument("--num_val_samples", '-v', type=int, default=256, help="Number of validation samples "
@@ -65,15 +66,6 @@ if __name__ == "__main__":
     model_params = conv_draw_nn.collect_params()
     model_params.initialize(ctx=ctx)
 
-    batch = train_iter.next()
-    x = batch.data[0].as_in_context(ctx)
-    y, qs, ps = conv_draw_nn(x)
-    pass
-
-    """
-    conv_draw_nn = ConvDRAW(args.num_steps, args.batch_size, args.num_recurrent_maps, input_shape,
-                   args.num_latent_maps, ctx)
-
     # loss function
     loss_fn = ConvDRAWLoss(SigmoidBinaryCrossEntropyLoss(from_sigmoid=False, batch_axis=0), input_dim, args.latent_dim)
 
@@ -97,9 +89,8 @@ if __name__ == "__main__":
                    args.logdir, (plot_grad_cb, generate_image_cb))
 
     # save model
-    conv_draw_nn.save('results', run_id)
+    conv_draw_nn.save_parameters('results/conv_draw_{}.params'.format(run_id))
 
     # generate samples
     generate_sampling_gif(conv_draw_nn, image_shape=input_shape, save_path='results', save_prefix=run_id,
-                          draw_attention=False, scale_factor=2.0)
-    """
+                          scale_factor=2.0)

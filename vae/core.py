@@ -62,7 +62,7 @@ class VAELossKLTerm(Loss):
         mu = q[:, 0:self._latent_dim]
         log_sd = q[:, self._latent_dim:]
 
-        # first term in Eq. 10. acts as a
+        # first term in Eq. 10. acts as a regularizer
         kl_term = 0.5 * (-self._latent_dim - F.sum(2. * log_sd, axis=0, exclude=True) +
                          F.sum(F.square(mu), axis=0, exclude=True) +
                          F.sum(F.exp(2. * log_sd), axis=0, exclude=True))

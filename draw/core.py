@@ -412,8 +412,9 @@ def _draw_square(image: np.ndarray, center_x: int, center_y: int, width: int, th
     return image
 
 
-def generate_sampling_gif(draw_nn: DRAW, image_shape: Tuple[int, int], save_path: str, save_prefix: str,
-                          from_x: nd.NDArray = None, draw_attention: bool = False, scale_factor: float = 1.):
+def generate_sampling_gif(draw_nn: DRAW, image_shape: Union[Tuple[int, int], Tuple[int, int, int]], save_path: str,
+                          save_prefix: str, from_x: nd.NDArray = None, draw_attention: bool = False,
+                          scale_factor: float = 1.):
     """
     Generate animations of sampling from the given model.
 
@@ -432,7 +433,7 @@ def generate_sampling_gif(draw_nn: DRAW, image_shape: Tuple[int, int], save_path
         samples, attn_params = samples
         attn_params = attn_params.asnumpy().transpose((1, 0, 2))
     # convert samples to images
-    samples = samples.asnumpy().transpose((1, 0, 2))  # batch x steps x feats
+    samples = samples.asnumpy().swapaxes(0, 1)  # batch x steps x feats
     samples = samples.reshape(samples.shape[0:2] + image_shape)  # batch x steps x h x w
     samples = (samples * 255).astype(np.uint8)
     samples = np.tile(samples[:, :, :, :, None], (1, 1, 1, 1, 3))  # to rgb

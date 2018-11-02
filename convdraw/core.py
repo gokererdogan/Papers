@@ -8,7 +8,7 @@ An MxNet implementation of the convolutional recurrent variational autoencoder d
 goker erdogan
 https://github.com/gokererdogan
 """
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import mxnet as mx
 import mxnet.ndarray as nd
@@ -20,7 +20,7 @@ from draw.core import generate_sampling_gif as draw_generate_sampling_gif
 from vae.core import NormalSamplingBlock
 
 
-class ConvDrawLossKLTerm(Loss):
+class ConvDRAWLossKLTerm(Loss):
     """
     KL term in variational lower bound used for training ConvDraw.
 
@@ -42,7 +42,7 @@ class ConvDrawLossKLTerm(Loss):
         log_sd_q = q[:, self._latent_dim:]
         log_sd_p = p[:, self._latent_dim:]
 
-        # first term in Eq. 10. acts as a
+        # first term in Eq. 10. acts as a regularizer
         kl_term = 0.5 * (-self._latent_dim + F.sum(2. * log_sd_p, axis=0, exclude=True) -
                          F.sum(2. * log_sd_q, axis=0, exclude=True) +
                          F.sum(F.square((mu_q - mu_p) / F.exp(log_sd_p)), axis=0, exclude=True) +
@@ -73,7 +73,7 @@ class ConvDRAWLoss(Loss):
 
         with self.name_scope():
             self._fit_loss = fit_loss
-            self._kl_loss = ConvDrawLossKLTerm(latent_dim)
+            self._kl_loss = ConvDRAWLossKLTerm(latent_dim)
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         # x: input, args[0]: latent prob. distribution, args[1]: latent prior prob. distribution,
@@ -154,65 +154,60 @@ class ConvDRAW(HybridBlock):
                                            i2h_pad=(self._kernel_size[0]//2, self._kernel_size[1]//2))  # (Step 5)
             self._dec_dense = Dense(units=self._latent_dim * 2)  # prior on q (Step 4 in the paper)
 
-    # def generate(self, x: nd.NDArray = None, include_intermediate: bool = False, return_attn_params: bool = False) -> \
-    #         Union[nd.NDArray, Tuple[nd.NDArray, nd.NDArray]]:
-    #     """
-    #     Generate a batch of samples from model. See Section 2.3 in paper.
-    #
-    #     If x is None, this method generates unconditional samples from the model (as explained in Section 2.3 in the
-    #     paper).
-    #
-    #     If x is provided, this method reconstructs the input to generate the sample. This is not really a true sample
-    #     from the model because the model looks at the image it is trying to generate. However, this is useful for seeing
-    #     how the model generates a particular image. (I believe this is how the figures in the paper are generated.)
-    #
-    #     :param x: Input to generate images from. This is not really an unconditional sample from the model. This is
-    #     :param include_intermediate: If True, samples from all timesteps (not only the last timestep) are returned.
-    #     :param return_attn_params: If True, returns attention params along with generated samples.
-    #     :return: n x input dim array of generated samples. If include_intermediate is True, then steps x n x input dim.
-    #     """
-    #     canvases = []
-    #     attn_params = []
-    #
-    #     canvas = nd.zeros((self._batch_size, *self._input_shape), ctx=self._ctx)
-    #     h_dec = nd.zeros((self._batch_size, *self._input_shape), ctx=self._ctx)
-    #     c_dec = nd.zeros((self._batch_size, *self._input_shape), ctx=self._ctx)
-    #
-    #     if x is not None:
-    #         h_enc = nd.broadcast_to(self._enc_rnn_h_init.data(), (self._batch_size, 0))
-    #         c_enc = nd.broadcast_to(self._enc_rnn_c_init.data(), (self._batch_size, 0))
-    #
-    #     for i in range(self._num_steps):
-    #         canvases.append(nd.sigmoid(canvas))
-    #
-    #         if x is not None:
-    #             err = x - nd.sigmoid(canvas)
-    #             r, _ = self._read_layer(x, err, h_dec, c_dec)
-    #             _, (h_enc, c_enc) = self._enc_rnn(nd.concat(r, h_dec, c_dec, dim=1), [h_enc, c_enc])
-    #
-    #             q = self._enc_dense(h_enc)
-    #             z = self._latent_layer(q)
-    #         else:
-    #             z = nd.random.normal(shape=(self._batch_size, self._latent_dim), ctx=self._ctx)
-    #
-    #         _, (h_dec, c_dec) = self._dec_rnn(z, [h_dec, c_dec])
-    #         w, attn_param = self._write_layer(h_dec, c_dec)
-    #         attn_params.append(attn_param)
-    #         canvas = canvas + w
-    #
-    #     if include_intermediate:
-    #         samples = nd.stack(*canvases, axis=0)
-    #     else:
-    #         samples = canvases[-1]
-    #
-    #     if return_attn_params:
-    #         return samples, nd.stack(*attn_params, axis=0)
-    #     else:
-    #         return samples
+    def generate(self, x: nd.NDArray = None, include_intermediate: bool = False, **kwargs) -> \
+            Union[nd.NDArray, Tuple[nd.NDArray, nd.NDArray]]:
+        """
+        Generate a batch of samples from model. See Section 2.3 in paper.
+
+        If x is None, this method generates unconditional samples from the model (as explained in Section 2.3 in the
+        paper).
+
+        If x is provided, this method reconstructs the input to generate the sample. This is not really a true sample
+        from the model because the model looks at the image it is trying to generate. However, this is useful for seeing
+        how the model generates a particular image.
+
+        :param x: Input to generate images from. This is not really an unconditional sample from the model. This is
+        :param include_intermediate: If True, samples from all timesteps (not only the last timestep) are returned.
+        :return: n x *image_shape array of generated samples. If include_intermediate is True,
+            then steps x n x *image_shape.
+        """
+        r = nd.zeros((self._batch_size, *self._input_shape), ctx=self._ctx)  # reconstruction
+        h_dec = nd.zeros((self._batch_size, *self._rnn_hidden_shape), ctx=self._ctx)
+        c_dec = nd.zeros((self._batch_size, *self._rnn_hidden_shape), ctx=self._ctx)
+
+        if x is not None:
+            h_enc = nd.zeros((self._batch_size, *self._rnn_hidden_shape), ctx=self._ctx)
+            c_enc = nd.zeros((self._batch_size, *self._rnn_hidden_shape), ctx=self._ctx)
+            encoded_x = self._enc_nn(x)
+
+        rs = []  # sample(s) over time
+
+        for i in range(self._num_steps):
+            rs.append(nd.sigmoid(r))
+            encoded_r = self._enc_nn(rs[-1])
+            if x is not None:
+                err = encoded_x - encoded_r
+                _, (h_enc, c_enc) = self._enc_rnn(nd.concat(encoded_x, err, h_dec, c_dec, dim=1), [h_enc, c_enc])
+                q = self._enc_dense(h_enc)
+                z = self._latent_layer(q)
+            else:
+                z = nd.random.normal(shape=(self._batch_size, self._latent_dim), ctx=self._ctx)
+
+            dec_z = nd.broadcast_to(nd.expand_dims(nd.expand_dims(z, axis=-1), axis=-1),
+                                    (self._batch_size, self._latent_dim, *self._rnn_hidden_shape[1:]))
+            _, (h_dec, c_dec) = self._dec_rnn(nd.concat(dec_z, encoded_r, dim=1), [h_dec, c_dec])
+            r = r + self._dec_nn(h_dec)
+
+        if include_intermediate:
+            samples = nd.stack(*rs, axis=0)
+        else:
+            samples = rs[-1]
+
+        return samples
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         with x.context:
-            r = F.zeros((self._batch_size, *self._input_shape), ctx=self._ctx)  # reconstruction
+            r = F.zeros((self._batch_size, *self._input_shape))  # reconstruction
             h_enc = F.zeros((self._batch_size, *self._rnn_hidden_shape))
             c_enc = F.zeros((self._batch_size, *self._rnn_hidden_shape))
             h_dec = F.zeros((self._batch_size, *self._rnn_hidden_shape))
@@ -221,9 +216,9 @@ class ConvDRAW(HybridBlock):
             qs = []  # latent (approximate posterior) distributions for each step
             ps = []  # prior distributions of latents for each step
 
+            encoded_x = self._enc_nn(x)
             for i in range(self._num_steps):
-                encoded_x = self._enc_nn(x)
-                encoded_r = self._enc_nn(r)
+                encoded_r = self._enc_nn(F.sigmoid(r))
                 err = encoded_x - encoded_r
 
                 _, (h_enc, c_enc) = self._enc_rnn(F.concat(encoded_x, err, h_dec, c_dec, dim=1), [h_enc, c_enc])
@@ -245,7 +240,7 @@ class ConvDRAW(HybridBlock):
         return r, nd.stack(*qs, axis=0), nd.stack(*ps, axis=0)  # qs and ps: steps x batch x latent
 
 
-def generate_sampling_gif(conv_draw_nn: ConvDRAW, image_shape: Tuple[int, int], save_path: str, save_prefix: str,
+def generate_sampling_gif(conv_draw_nn: ConvDRAW, image_shape: Tuple[int, int, int], save_path: str, save_prefix: str,
                           from_x: nd.NDArray = None, scale_factor: float = 1.):
     """
     Generate animations of sampling from the given model.

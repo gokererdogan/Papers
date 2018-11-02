@@ -1,5 +1,5 @@
 from time import strftime
-from typing import List, Callable, Tuple
+from typing import List, Callable, Tuple, Union
 import os
 from pathlib import Path
 
@@ -92,7 +92,7 @@ class PlotGenerateImage:
     """
     A simple plot callback to plot an image sampled from the model.
     """
-    def __init__(self, nn: HybridBlock, freq: int, image_shape: Tuple[int, int]):
+    def __init__(self, nn: HybridBlock, freq: int, image_shape: Union[Tuple[int, int], Tuple[int, int, int]]):
         """
         :param nn: Generative model to sample from. Must implement generate method. See DRAW for an example.
         :param freq: Plotting frequency.
