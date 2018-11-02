@@ -7,7 +7,7 @@ from mxnet.gluon import nn, Trainer
 from mxnet.gluon.loss import SigmoidBinaryCrossEntropyLoss
 
 from common import get_omniglot, PlotGradientHistogram, PlotGenerateImage, train
-from convdraw.core import ConvDRAW, ConvDRAWLoss, generate_sampling_gif
+from convdraw.core import ConvDRAW, ConvDRAWLoss, generate_sampling_gif, generate_samples
 
 
 def build_encoder_nn():
@@ -92,5 +92,6 @@ if __name__ == "__main__":
     conv_draw_nn.save_parameters('results/conv_draw_{}.params'.format(run_id))
 
     # generate samples
-    generate_sampling_gif(conv_draw_nn, image_shape=input_shape, save_path='results', save_prefix=run_id,
-                          scale_factor=2.0)
+    # generate_sampling_gif(conv_draw_nn, image_shape=input_shape, save_path='results', save_prefix=run_id,
+    #                       scale_factor=2.0)
+    generate_samples(conv_draw_nn, input_shape, 'results', run_id, scale_factor=2.0)

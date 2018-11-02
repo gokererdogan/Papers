@@ -276,7 +276,8 @@ def generate_samples(conv_draw_nn: ConvDRAW, image_shape: Tuple[int, int, int], 
     samples = conv_draw_nn.generate(None, include_intermediate=False)
 
     # convert samples to binary images (flip black and white)
-    samples = ((samples.asnumpy() < 0.5) * 255).astype(np.uint8)
+    # we use 0.2 for black-white threshold (instead of 0.5). this produces visually more appealing results.
+    samples = ((samples.asnumpy() < 0.2) * 255).astype(np.uint8)
     samples = samples.transpose((0, 2, 3, 1))  # from CxHxW to HxWxC
     if image_shape[0] == 1:
         samples = np.tile(samples, (1, 1, 1, 3))  # to rgb
