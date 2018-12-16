@@ -16,7 +16,7 @@ An [MXNet](https://mxnet.incubator.apache.org/) implementation of the recurrent 
 
 `train_omniglot.py`trains DRAW on OmniGlot dataset.  
 
-Look at the `omniglot_to_ndarray.py` script to see how to get the dataset.
+Look at the `../data/omniglot_to_ndarray.py` script to see how to get the dataset.
 
 In the figure above, you see samples from the model trained on OmniGlot with the default parameters (for 500,000 training samples). The final log negative log likelihood is around 70 nats. This is much lower than what is reported in the paper but note that the dataset here is not the same with the dataset used in the paper. So these numbers are probably not comparable. Note the pictures above are true samples from the model, not the reconstructions for real images in the training or validation sets.
 
