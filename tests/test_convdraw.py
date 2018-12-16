@@ -97,10 +97,10 @@ def test_convdraw_loss():
     q = nd.concat(mu_q, log_sd_q, dim=2)
     p = nd.concat(mu_p, log_sd_p, dim=2)
 
-    convdraw_loss = ConvDRAWLoss(fit_loss=lambda y, x: 1.0, input_dim=4, latent_shape=(2, 3, 3), input_cost_scale=0.5)
+    convdraw_loss = ConvDRAWLoss(fit_loss=lambda y, x: 1.0, input_dim=4, latent_shape=(1, 2, 1), input_cost_scale=0.5)
 
-    mock_x = nd.zeros((3, 2, 3), ctx=ctx)
-    mock_y = nd.zeros((3, 2, 3), ctx=ctx)
+    mock_x = nd.zeros((3, 4), ctx=ctx)
+    mock_y = nd.zeros((3, 4), ctx=ctx)
     val = convdraw_loss(mock_x, q, p, mock_y)
 
     expected_kl = (np.array([2.163733219326574, 1.3212104456828437, 0.5344416978024983]) +
