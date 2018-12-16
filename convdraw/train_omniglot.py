@@ -5,18 +5,10 @@ import argparse
 import mxnet as mx
 from mxnet.gluon import nn, Trainer, HybridBlock
 from mxnet.gluon.loss import SigmoidBinaryCrossEntropyLoss
-from mxnet.gluon.nn import Conv2D
+from mxnet.gluon.nn import Conv2D, Conv2DTranspose
 
 from common import get_omniglot, PlotGradientHistogram, PlotGenerateImage, train
-from convdraw.core import ConvDRAW, ConvDRAWLoss, generate_samples, Conv2DWithBatchNorm, Conv2DTransposeWithBatchNorm
-
-
-class IdentityBlock(HybridBlock):
-    def __init__(self, prefix: str = None):
-        super().__init__(prefix=prefix)
-
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        return x
+from convdraw.core import ConvDRAW, ConvDRAWLoss, generate_samples
 
 
 class WithELU(HybridBlock):
@@ -31,25 +23,29 @@ class WithELU(HybridBlock):
 
 
 def build_encoder_nn():
-    return IdentityBlock(), (1, 28, 28)
+    nnet = nn.HybridSequential()
+    nnet.add(WithELU(Conv2D(channels=16, kernel_size=(5, 5), strides=(2, 2))))
+    return nnet, (16, 12, 12)
 
 
 def build_decoder_nn():
-    return Conv2D(channels=1, kernel_size=1)
+    nnet = nn.HybridSequential()
+    nnet.add(Conv2DTranspose(channels=1, kernel_size=(5, 5), strides=(2, 2), output_padding=(1, 1)))
+    return nnet
 
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Train ConvDRAW on Omniglot dataset")
-    ap.add_argument("--batch_size", '-b', type=int, default=8, help="Batch size")
+    ap.add_argument("--batch_size", '-b', type=int, default=32, help="Batch size")
     ap.add_argument("--num_steps", '-s', type=int, default=16, help="Number of recurrent steps")
     ap.add_argument("--num_latent_maps", '-l', type=int, default=3, help="Number of latent feature maps.")
     ap.add_argument("--num_recurrent_maps", '-u', type=int, default=64, help="Number of feature maps in recurrent "
                                                                              "encoder and decoder")
     ap.add_argument("--learning_rate", '-r', type=float, default=5*1e-4, help="Learning rate")
-    ap.add_argument("--num_train_samples", '-t', type=int, default=1e5, help="Number of training samples")
+    ap.add_argument("--num_train_samples", '-t', type=int, default=5e5, help="Number of training samples")
     ap.add_argument("--num_val_samples", '-v', type=int, default=128, help="Number of validation samples "
                                                                            "(per validation run)")
-    ap.add_argument("--val_freq", '-f', type=int, default=1e4, help="Validation frequency (run validation every "
+    ap.add_argument("--val_freq", '-f', type=int, default=2e4, help="Validation frequency (run validation every "
                                                                     "val_freq training samples)")
     ap.add_argument("--gpu", action='store_true', help="If True, train on GPU")
     ap.add_argument("--logdir", type=str, default='results', help='Log directory for mxboard.')

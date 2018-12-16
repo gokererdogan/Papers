@@ -13,57 +13,15 @@ from typing import Optional, Tuple, Union
 
 import imageio
 import mxnet as mx
-import numpy as np
 import mxnet.ndarray as nd
+import numpy as np
 from mxnet.gluon.contrib.rnn import Conv2DLSTMCell
 from mxnet.gluon.loss import Loss
-from mxnet.gluon.nn import BatchNorm, Conv2D, Conv2DTranspose, Dense, HybridBlock
+from mxnet.gluon.nn import Conv2D, HybridBlock
 from skimage import transform
 
 from draw.core import generate_sampling_gif as draw_generate_sampling_gif
 from vae.core import NormalSamplingBlock
-
-
-class Conv2DWithBatchNorm(HybridBlock):
-    def __init__(self, channels, kernel_size, activation: str = None, strides=(1, 1), padding=(0, 0), dilation=(1, 1),
-                 prefix: str = None):
-        super().__init__(prefix=prefix)
-
-        self._activation = activation
-
-        with self.name_scope():
-            self._conv = Conv2D(channels=channels, kernel_size=kernel_size, strides=strides, padding=padding,
-                                dilation=dilation)
-            self._bn = BatchNorm()
-
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        conv_out = self._conv(x)
-        bn_out = self._bn(conv_out)
-        out = bn_out
-        if self._activation is not None:
-            out = F.Activation(out, act_type=self._activation)
-        return out
-
-
-class Conv2DTransposeWithBatchNorm(HybridBlock):
-    def __init__(self, channels, kernel_size, activation: str = None, strides=(1, 1), padding=(0, 0), dilation=(1, 1),
-                 prefix: str = None):
-        super().__init__(prefix=prefix)
-
-        self._activation = activation
-
-        with self.name_scope():
-            self._conv = Conv2DTranspose(channels=channels, kernel_size=kernel_size, strides=strides, padding=padding,
-                                         dilation=dilation)
-            self._bn = BatchNorm()
-
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        conv_out = self._conv(x)
-        bn_out = self._bn(conv_out)
-        out = bn_out
-        if self._activation is not None:
-            out = F.Activation(out, act_type=self._activation)
-        return out
 
 
 class ConvDRAWLossKLTerm(Loss):
@@ -244,8 +202,12 @@ class ConvDRAW(HybridBlock):
                 q = self._q_layer(h_enc)
                 # convert NxCxHxW to NxF
                 q = nd.reshape(q, (self._batch_size, -1))
+                z = self._latent_layer(q)
             else:
-                z = nd.random.normal(shape=(self._batch_size, self._latent_dim), ctx=self._ctx)
+                # sample from prior
+                p = self._p_layer(h_dec)
+                p = nd.reshape(p, (self._batch_size, -1))
+                z = self._latent_layer(p)
 
             dec_z = nd.reshape(z, (self._batch_size, self._num_latent_maps, *self._encoder_output_shape[1:]))
             _, (h_dec, c_dec) = self._dec_rnn(nd.concat(dec_z, encoded_r, dim=1), [h_dec, c_dec])
@@ -328,7 +290,7 @@ def generate_samples(conv_draw_nn: ConvDRAW, image_shape: Tuple[int, int, int], 
 
     # convert samples to binary images (flip black and white)
     # we use 0.2 for black-white threshold (instead of 0.5). this produces visually more appealing results.
-    samples = ((samples.asnumpy() < 0.2) * 255).astype(np.uint8)
+    samples = ((samples.asnumpy() < 0.5) * 255).astype(np.uint8)
     samples = samples.transpose((0, 2, 3, 1))  # from CxHxW to HxWxC
     if image_shape[0] == 1:
         samples = np.tile(samples, (1, 1, 1, 3))  # to rgb
