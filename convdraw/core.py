@@ -17,11 +17,53 @@ import numpy as np
 import mxnet.ndarray as nd
 from mxnet.gluon.contrib.rnn import Conv2DLSTMCell
 from mxnet.gluon.loss import Loss
-from mxnet.gluon.nn import Dense, HybridBlock
+from mxnet.gluon.nn import BatchNorm, Conv2D, Conv2DTranspose, Dense, HybridBlock
 from skimage import transform
 
 from draw.core import generate_sampling_gif as draw_generate_sampling_gif
 from vae.core import NormalSamplingBlock
+
+
+class Conv2DWithBatchNorm(HybridBlock):
+    def __init__(self, channels, kernel_size, activation: str = None, strides=(1, 1), padding=(0, 0), dilation=(1, 1),
+                 prefix: str = None):
+        super().__init__(prefix=prefix)
+
+        self._activation = activation
+
+        with self.name_scope():
+            self._conv = Conv2D(channels=channels, kernel_size=kernel_size, strides=strides, padding=padding,
+                                dilation=dilation)
+            self._bn = BatchNorm()
+
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        conv_out = self._conv(x)
+        bn_out = self._bn(conv_out)
+        out = bn_out
+        if self._activation is not None:
+            out = F.Activation(out, act_type=self._activation)
+        return out
+
+
+class Conv2DTransposeWithBatchNorm(HybridBlock):
+    def __init__(self, channels, kernel_size, activation: str = None, strides=(1, 1), padding=(0, 0), dilation=(1, 1),
+                 prefix: str = None):
+        super().__init__(prefix=prefix)
+
+        self._activation = activation
+
+        with self.name_scope():
+            self._conv = Conv2DTranspose(channels=channels, kernel_size=kernel_size, strides=strides, padding=padding,
+                                         dilation=dilation)
+            self._bn = BatchNorm()
+
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        conv_out = self._conv(x)
+        bn_out = self._bn(conv_out)
+        out = bn_out
+        if self._activation is not None:
+            out = F.Activation(out, act_type=self._activation)
+        return out
 
 
 class ConvDRAWLossKLTerm(Loss):
@@ -61,23 +103,24 @@ class ConvDRAWLoss(Loss):
 
     See Eq. 11 in the paper.
     """
-    def __init__(self, fit_loss: Loss, input_dim: int, latent_dim: int, input_cost_scale: float = 1.0):
+    def __init__(self, fit_loss: Loss, input_dim: int, latent_shape: Tuple[int, int, int],
+                 input_cost_scale: float = 1.0):
         """
         :param fit_loss: Loss used for p(x|z), i.e., reconstruction loss. Note the output of VAE is not passed through
             sigmoid. We assume that the loss function averages over (input/output) features, rather than summing.
         :param input_dim: Input dimensionality.
-        :param latent_dim: Dimensionality of latent space
+        :param latent_shape: Shape of latent space, CxHxW.
         """
         super().__init__(weight=1, batch_axis=0)
 
         assert 0. < input_cost_scale <= 1.0, "Input cost scale must be in (0, 1]"
         self._input_dim = input_dim
-        self._latent_dim = latent_dim
+        self._latent_dim = int(np.prod(latent_shape))
         self._input_cost_scale = input_cost_scale
 
         with self.name_scope():
             self._fit_loss = fit_loss
-            self._kl_loss = ConvDRAWLossKLTerm(latent_dim)
+            self._kl_loss = ConvDRAWLossKLTerm(self._latent_dim)
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         # x: input, args[0]: latent prob. distribution, args[1]: latent prior prob. distribution,
@@ -106,7 +149,7 @@ class ConvDRAW(HybridBlock):
     """
     def __init__(self, encoder_nn: HybridBlock, decoder_nn: HybridBlock,
                  num_steps: int, batch_size: int,
-                 input_shape: Tuple[int, int, int], latent_dim: int,
+                 input_shape: Tuple[int, int, int], num_latent_maps: int,
                  encoder_output_shape: Tuple[int, int, int], rnn_hidden_channels: int, kernel_size: Tuple[int, int],
                  ctx: mx.Context = mx.cpu(), prefix: Optional[str] = None):
         """
@@ -116,10 +159,10 @@ class ConvDRAW(HybridBlock):
         :param num_steps: Number of recurrent steps (i.e., set of latent variables).
         :param batch_size: Batch size.
         :param input_shape: Input shape, CxHxW.
-        :param latent_dim: Number of latent features.
+        :param num_latent_maps: Number of latent feature maps.
         :param encoder_output_shape: Shape of the output of encoder network, CxHxW.
         :param rnn_hidden_channels: Number of channels in encoder/decoder LSTMs' hidden state.
-        :param kernel_size: Kernel size for the convolution in encoder and decoder LSTMs.
+        :param kernel_size: Kernel size for the convolution in encoder and decoder LSTMs, and latent layers.
         :param ctx: Context.
         :param prefix: Prefix for block.
         """
@@ -128,35 +171,40 @@ class ConvDRAW(HybridBlock):
         self._batch_size = batch_size
         self._num_steps = num_steps
         self._input_shape = input_shape
-        self._latent_dim = latent_dim
+        self._num_latent_maps = num_latent_maps
         self._encoder_output_shape = encoder_output_shape
         self._rnn_hidden_channels = rnn_hidden_channels
         self._kernel_size = kernel_size
         self._ctx = ctx
 
         self._rnn_hidden_shape = (self._rnn_hidden_channels, *self._encoder_output_shape[1:])
+        self._latent_dim = self._num_latent_maps * int(np.prod(self._encoder_output_shape[1:]))
 
         with self.name_scope():
             self._enc_nn = encoder_nn
 
             # input to encoder rnn: x (image), difference image (eps), and hidden state of decoder (h_dec and c_dec)
             num_input_channels = (self._encoder_output_shape[0]*2 + 2*self._rnn_hidden_channels)
+            pad = (self._kernel_size[0]//2, self._kernel_size[1]//2)
             self._enc_rnn = Conv2DLSTMCell(input_shape=(num_input_channels, *self._encoder_output_shape[1:]),
                                            hidden_channels=self._rnn_hidden_channels,
                                            i2h_kernel=self._kernel_size, h2h_kernel=self._kernel_size,
-                                           i2h_pad=(self._kernel_size[0]//2, self._kernel_size[1]//2))  # (Step 2)
-            self._enc_dense = Dense(units=self._latent_dim * 2)  # output of enc rnn to latent distribution q (Step 3)
+                                           i2h_pad=pad)  # (Step 2)
+            # output of enc rnn to latent distribution q (Step 3)
+            self._q_layer = Conv2D(channels=self._num_latent_maps * 2, kernel_size=self._kernel_size, padding=pad)
             self._latent_layer = NormalSamplingBlock(self._batch_size, self._latent_dim)
 
             self._dec_nn = decoder_nn  # (Step 6)
 
             # input to decoder rnn: z (latent), reconstruction (r)
-            num_input_channels = (self._latent_dim + self._encoder_output_shape[0])
+            num_input_channels = (self._num_latent_maps + self._encoder_output_shape[0])
             self._dec_rnn = Conv2DLSTMCell(input_shape=(num_input_channels, *self._encoder_output_shape[1:]),
                                            hidden_channels=self._rnn_hidden_channels,
                                            i2h_kernel=self._kernel_size, h2h_kernel=self._kernel_size,
-                                           i2h_pad=(self._kernel_size[0]//2, self._kernel_size[1]//2))  # (Step 5)
-            self._dec_dense = Dense(units=self._latent_dim * 2)  # prior on q (Step 4 in the paper)
+                                           i2h_pad=pad)  # (Step 5)
+
+            # prior on q (Step 4 in the paper)
+            self._p_layer = Conv2D(channels=self._num_latent_maps * 2, kernel_size=self._kernel_size, padding=pad)
 
     def generate(self, x: nd.NDArray = None, include_intermediate: bool = False, **kwargs) -> \
             Union[nd.NDArray, Tuple[nd.NDArray, nd.NDArray]]:
@@ -192,13 +240,14 @@ class ConvDRAW(HybridBlock):
             if x is not None:
                 err = encoded_x - encoded_r
                 _, (h_enc, c_enc) = self._enc_rnn(nd.concat(encoded_x, err, h_dec, c_dec, dim=1), [h_enc, c_enc])
-                q = self._enc_dense(h_enc)
-                z = self._latent_layer(q)
+
+                q = self._q_layer(h_enc)
+                # convert NxCxHxW to NxF
+                q = nd.reshape(q, (self._batch_size, -1))
             else:
                 z = nd.random.normal(shape=(self._batch_size, self._latent_dim), ctx=self._ctx)
 
-            dec_z = nd.broadcast_to(nd.expand_dims(nd.expand_dims(z, axis=-1), axis=-1),
-                                    (self._batch_size, self._latent_dim, *self._rnn_hidden_shape[1:]))
+            dec_z = nd.reshape(z, (self._batch_size, self._num_latent_maps, *self._encoder_output_shape[1:]))
             _, (h_dec, c_dec) = self._dec_rnn(nd.concat(dec_z, encoded_r, dim=1), [h_dec, c_dec])
             r = r + self._dec_nn(h_dec)
 
@@ -227,15 +276,17 @@ class ConvDRAW(HybridBlock):
 
                 _, (h_enc, c_enc) = self._enc_rnn(F.concat(encoded_x, err, h_dec, c_dec, dim=1), [h_enc, c_enc])
 
-                q = self._enc_dense(h_enc)
+                q = self._q_layer(h_enc)
+                # convert NxCxHxW to NxF
+                q = F.reshape(q, (self._batch_size, -1))
                 qs.append(q)
                 z = self._latent_layer(q)
 
-                p = self._dec_dense(h_dec)
+                p = self._p_layer(h_dec)
+                p = F.reshape(p, (self._batch_size, -1))
                 ps.append(p)
 
-                dec_z = F.broadcast_to(F.expand_dims(F.expand_dims(z, axis=-1), axis=-1),
-                                       (self._batch_size, self._latent_dim, *self._rnn_hidden_shape[1:]))
+                dec_z = F.reshape(z, (self._batch_size, self._num_latent_maps, *self._encoder_output_shape[1:]))
                 _, (h_dec, c_dec) = self._dec_rnn(F.concat(dec_z, encoded_r, dim=1), [h_dec, c_dec])
 
                 r = r + self._dec_nn(h_dec)

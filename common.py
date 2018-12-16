@@ -128,8 +128,9 @@ class PlotGradientHistogram:
         if samples_processed - self._last_call > self._freq:
             self._last_call = samples_processed
             for k, p in self._params.items():
-                g = p.grad().asnumpy()
-                mxb_writer.add_histogram(k, g, samples_processed, bins=10)
+                if p.grad_req != 'null':
+                    g = p.grad().asnumpy()
+                    mxb_writer.add_histogram(k, g, samples_processed, bins=10)
 
 
 def train(forward_fn: Callable[[mx.io.DataBatch], nd.NDArray], train_iter: mx.io.DataIter, val_iter: mx.io.DataIter,
