@@ -1,3 +1,4 @@
+import pickle
 from time import strftime
 from typing import List, Callable, Tuple, Union
 import os
@@ -10,6 +11,7 @@ import numpy as np
 import tqdm
 from mxnet import autograd
 from mxnet.gluon import Parameter, Trainer, HybridBlock
+from mxnet.gluon.data import BatchSampler, RandomSampler
 from mxnet.test_utils import get_mnist_ubyte
 
 DATA_FOLDER_PATH = Path(__file__).parent / 'data'
@@ -30,6 +32,84 @@ class BinarizedMNISTIter(mx.io.DataIter):
 
     def reset(self):
         self._mnist_iter.reset()
+
+
+class GQNDataIter(mx.io.DataIter):
+    """
+    Data iterator for GQN datasets.
+
+    Batch format:
+        batch.data[0]: Context camera positions, shape: Batch x Sequence x Camera feats
+        batch.data[1]: Context image frames, shape: Batch x Sequence x 3 x H x w
+        batch.data[2]: Query camera position, shape: Batch x Camera feats
+        batch.label[0]: Query image frame, shape: Batch x 3 x H x W
+
+    See data/gqn_data_to_recordio.py for how to convert GQN tfrecord files to an MXNet recordio file.
+    """
+    def __init__(self, dataset_name: str, dataset_type: str, context_size_range: Tuple[int], batch_size: int,
+                 ctx: mx.Context):
+        """
+        :param dataset_name: Dataset name.
+        :param dataset_type: 'train' or 'test'.
+        :param context_size_range: Range of context size (number of images taken from a scene, except the query image).
+        :param batch_size: Minibatch size.
+        :param ctx: Context for data (cpu or gpu).
+        """
+        super().__init__(batch_size=batch_size)
+        idx_filepath = str(Path(DATA_FOLDER_PATH, '{}_{}.idx'.format(dataset_name, dataset_type)))
+        rec_filepath = str(Path(DATA_FOLDER_PATH, '{}_{}.rec'.format(dataset_name, dataset_type)))
+        self._rec_file = mx.recordio.MXIndexedRecordIO(idx_filepath, rec_filepath, 'r', key_type=int)
+
+        self._dataset_name = dataset_name
+        self._dataset_type = dataset_type
+        self._context_size_range = context_size_range
+        self._batch_size = batch_size
+        self._ctx = ctx
+
+        self._num_scenes = len(self._rec_file.keys)
+        self._batch_sampler = BatchSampler(RandomSampler(self._num_scenes), self._batch_size, last_batch='rollover')
+        self.reset()
+
+    def _read_single_record(self, i, context_size):
+        recs = np.random.choice(pickle.loads(self._rec_file.read_idx(i)), size=context_size+1, replace=False)
+        imgs = [mx.recordio.unpack_img(rec) for rec in recs]
+
+        cameras = np.stack([img[0].label for img in imgs], axis=0)
+        pos = cameras[:, 0:3]
+        yaw = cameras[:, 3:4]
+        pitch = cameras[:, 4:5]
+        cameras = np.hstack((pos, np.sin(yaw), np.cos(yaw), np.sin(pitch), np.cos(pitch)))
+
+        frames = [img[1].transpose((2, 0, 1)) for img in imgs]
+
+        context_cameras = np.stack(cameras[0:context_size], axis=0)
+        context_frames = np.stack(frames[0:context_size], axis=0)
+        query_camera = cameras[-1]
+        query_frame = frames[-1]
+
+        return context_cameras, context_frames, query_camera, query_frame
+
+    def _to_batch(self, records):
+        batch_context_cameras = nd.array(np.stack([rec[0] for rec in records], axis=0), ctx=self._ctx)
+        batch_context_frames = nd.array(np.stack([rec[1] for rec in records], axis=0), ctx=self._ctx)
+        batch_query_cameras = nd.array(np.stack([rec[2] for rec in records], axis=0), ctx=self._ctx)
+        batch_query_frames = nd.array(np.stack([rec[3] for rec in records], axis=0), ctx=self._ctx)
+        batch = mx.io.DataBatch(data=[batch_context_cameras, batch_context_frames, batch_query_cameras],
+                                label=[batch_query_frames])
+        return batch
+
+    def next(self):
+        batch_ix = self._batch_sampler_iter.__next__()
+
+        context_size = np.random.choice(self._context_size_range)
+        records = [self._read_single_record(i, context_size) for i in batch_ix]
+        batch = self._to_batch(records)
+
+        return batch
+
+    def reset(self):
+        # get a new iterator from batch sampler to reset
+        self._batch_sampler_iter = self._batch_sampler.__iter__()
 
 
 get_mnist = mx.test_utils.get_mnist_iterator
