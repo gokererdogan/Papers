@@ -245,7 +245,7 @@ class DRAW(HybridBlock):
         from the model because the model looks at the image it is trying to generate. However, this is useful for seeing
         how the model generates a particular image. (I believe this is how the figures in the paper are generated.)
 
-        :param x: Input to generate images from. This is not really an unconditional sample from the model. This is
+        :param x: Input to generate images from.
         :param include_intermediate: If True, samples from all timesteps (not only the last timestep) are returned.
         :param return_attn_params: If True, returns attention params along with generated samples.
         :return: n x input dim array of generated samples. If include_intermediate is True, then steps x n x input dim.

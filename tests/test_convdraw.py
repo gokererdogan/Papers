@@ -77,7 +77,7 @@ def test_convdraw_loss_kl_term_2():
     assert np.allclose(expected, val.asnumpy())
 
 
-def test_convdraw_init():
+def test_convdraw_loss_init():
     with pytest.raises(AssertionError):
         ConvDRAWLoss(None, 5, (3, 5, 5), 2.0)  # input cost scale out of bounds
 
@@ -140,6 +140,6 @@ def test_gradient():
 
     batch_x = mx.nd.random_uniform(shape=(batch_size, *input_shape))
 
-    fwd(batch_x)  # the following check fails for the first parameter is fwd is not called at least once before it.
+    fwd(batch_x)  # the following check fails for the first parameter if fwd is not called at least once before it.
     for p in model_params.values():
         assert check_gradient(fwd, [batch_x], p)

@@ -39,8 +39,8 @@ class GQNDataIter(mx.io.DataIter):
     Data iterator for GQN datasets.
 
     Batch format:
-        batch.data[0]: Context camera positions, shape: Batch x Sequence x Camera feats
-        batch.data[1]: Context image frames, shape: Batch x Sequence x 3 x H x w
+        batch.data[0]: Context image frames, shape: Batch x Sequence x 3 x H x w
+        batch.data[1]: Context camera positions, shape: Batch x Sequence x Camera feats
         batch.data[2]: Query camera position, shape: Batch x Camera feats
         batch.label[0]: Query image frame, shape: Batch x 3 x H x W
 
@@ -80,21 +80,21 @@ class GQNDataIter(mx.io.DataIter):
         pitch = cameras[:, 4:5]
         cameras = np.hstack((pos, np.sin(yaw), np.cos(yaw), np.sin(pitch), np.cos(pitch)))
 
-        frames = [img[1].transpose((2, 0, 1)) for img in imgs]
+        frames = [img[1].transpose((2, 0, 1)) / 255. for img in imgs]  # normalize to 0-1
 
         context_cameras = np.stack(cameras[0:context_size], axis=0)
         context_frames = np.stack(frames[0:context_size], axis=0)
         query_camera = cameras[-1]
         query_frame = frames[-1]
 
-        return context_cameras, context_frames, query_camera, query_frame
+        return context_frames, context_cameras, query_frame, query_camera
 
     def _to_batch(self, records):
-        batch_context_cameras = nd.array(np.stack([rec[0] for rec in records], axis=0), ctx=self._ctx)
-        batch_context_frames = nd.array(np.stack([rec[1] for rec in records], axis=0), ctx=self._ctx)
-        batch_query_cameras = nd.array(np.stack([rec[2] for rec in records], axis=0), ctx=self._ctx)
-        batch_query_frames = nd.array(np.stack([rec[3] for rec in records], axis=0), ctx=self._ctx)
-        batch = mx.io.DataBatch(data=[batch_context_cameras, batch_context_frames, batch_query_cameras],
+        batch_context_frames = nd.array(np.stack([rec[0] for rec in records], axis=0), ctx=self._ctx)
+        batch_context_cameras = nd.array(np.stack([rec[1] for rec in records], axis=0), ctx=self._ctx)
+        batch_query_frames = nd.array(np.stack([rec[2] for rec in records], axis=0), ctx=self._ctx)
+        batch_query_cameras = nd.array(np.stack([rec[3] for rec in records], axis=0), ctx=self._ctx)
+        batch = mx.io.DataBatch(data=[batch_context_frames, batch_context_cameras, batch_query_cameras],
                                 label=[batch_query_frames])
         return batch
 
@@ -152,6 +152,17 @@ def get_omniglot(batch_size):
     return train_dataiter, val_dataiter
 
 
+class WithELU(HybridBlock):
+    def __init__(self, block: HybridBlock, prefix: str = None):
+        super().__init__(prefix=prefix)
+
+        self._block = block
+
+    def hybrid_forward(self, F, x, *args, **kwargs):
+        y = self._block(x)
+        return F.LeakyReLU(y, act_type='elu')
+
+
 def _get_batch(data_iter: mx.io.DataIter):
     """
     Helper function for getting a batch from a data iterator continuously.
@@ -172,7 +183,8 @@ class PlotGenerateImage:
     """
     A simple plot callback to plot an image sampled from the model.
     """
-    def __init__(self, nn: HybridBlock, freq: int, image_shape: Union[Tuple[int, int], Tuple[int, int, int]]):
+    def __init__(self, nn: HybridBlock, freq: int, image_shape: Union[Tuple[int, int], Tuple[int, int, int]],
+                 conditioning_variables: Tuple[nd.NDArray] = tuple()):
         """
         :param nn: Generative model to sample from. Must implement generate method. See DRAW for an example.
         :param freq: Plotting frequency.
@@ -181,13 +193,14 @@ class PlotGenerateImage:
         self._nn = nn
         self._freq = freq
         self._image_shape = image_shape
+        self._conditioning_variables = conditioning_variables
         self._last_call = 0
 
     def __call__(self, mxb_writer: mxboard.SummaryWriter, samples_processed: int, *args, **kwargs):
         if samples_processed - self._last_call > self._freq:
             self._last_call = samples_processed
             # generate image from model
-            img = self._nn.generate().asnumpy()[0].reshape(self._image_shape)
+            img = self._nn.generate(*self._conditioning_variables).asnumpy()[0].reshape(self._image_shape)
             mxb_writer.add_image('Generated_image', img, samples_processed)
 
 
@@ -215,7 +228,8 @@ class PlotGradientHistogram:
 
 def train(forward_fn: Callable[[mx.io.DataBatch], nd.NDArray], train_iter: mx.io.DataIter, val_iter: mx.io.DataIter,
           trainer: Trainer, num_train_samples: int, num_val_samples: int, val_freq: int,
-          logdir: str, plot_callbacks: Tuple[Callable[[mxboard.SummaryWriter, int], None]] = tuple()):
+          logdir: str, run_suffix: str = '',
+          plot_callbacks: Tuple[Callable[[mxboard.SummaryWriter, int], None]] = tuple()):
     """
     Train the model given by its forward function.
 
@@ -228,10 +242,11 @@ def train(forward_fn: Callable[[mx.io.DataBatch], nd.NDArray], train_iter: mx.io
     :param num_val_samples: Number of validation samples (per validation).
     :param val_freq: Validation frequency (in number of samples).
     :param logdir: Log directory for mxboard.
+    :param run_suffix: Suffix for run id.
     :param plot_callbacks: A list of additional plotting callbacks. These are called after each update. A plotting
       callback should expect a mxboard.SummaryWriter and the iteration number. See DRAW/train_mnist.py for an example.
     """
-    run_id = strftime('%Y%m%d%H%M%S')
+    run_id = '{}{}'.format(strftime('%Y%m%d%H%M%S'), run_suffix)
     sw = mxboard.SummaryWriter(logdir=os.path.join(logdir, run_id))
     pm = tqdm.tqdm(total=num_train_samples)
 

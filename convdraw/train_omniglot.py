@@ -3,23 +3,12 @@
 import argparse
 
 import mxnet as mx
-from mxnet.gluon import nn, Trainer, HybridBlock
+from mxnet.gluon import nn, Trainer
 from mxnet.gluon.loss import SigmoidBinaryCrossEntropyLoss
 from mxnet.gluon.nn import Conv2D, Conv2DTranspose
 
-from common import get_omniglot, PlotGradientHistogram, PlotGenerateImage, train
+from common import get_omniglot, PlotGradientHistogram, PlotGenerateImage, train, WithELU
 from convdraw.core import ConvDRAW, ConvDRAWLoss, generate_samples
-
-
-class WithELU(HybridBlock):
-    def __init__(self, block: HybridBlock, prefix: str = None):
-        super().__init__(prefix=prefix)
-
-        self._block = block
-
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        y = self._block(x)
-        return F.LeakyReLU(y, act_type='elu')
 
 
 def build_encoder_nn():

@@ -60,7 +60,7 @@ def test_gradient():
 
     batch_x = mx.nd.random_uniform(shape=(batch_size, input_dim))
 
-    fwd(batch_x)  # the following check fails for the first parameter is fwd is not called at least once before it.
+    fwd(batch_x)  # the following check fails for the first parameter if fwd is not called at least once before it.
     for p in model_params.values():
         assert check_gradient(fwd, [batch_x], p)
 

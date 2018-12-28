@@ -6,6 +6,7 @@ from pathlib import Path
 
 import mxnet as mx
 import tensorflow as tf
+import tqdm
 
 
 """
@@ -102,7 +103,6 @@ def convert_dataset(dataset_name, dataset_type):
 
     # read tfrecord files into a dataset
     files = list(map(lambda p: str(p), Path(dataset_name, dataset_type).glob('*.tfrecord')))
-    files = files[0:10]
     ds = tf.data.TFRecordDataset(files)
     ds_info = _DATASETS[dataset_name]
     pds = ds.map(parse_fn)  # parse records into examples
@@ -112,6 +112,7 @@ def convert_dataset(dataset_name, dataset_type):
                                                   '{}_{}.rec'.format(dataset_name, dataset_type),
                                                   flag='w', key_type=int)
 
+    pb = tqdm.tqdm()
     for i, tf_rec in enumerate(pds):
         frames = [tf.image.decode_jpeg(frame).numpy() for frame in tf_rec['frames']]
         assert len(frames) == ds_info.sequence_size
@@ -125,6 +126,8 @@ def convert_dataset(dataset_name, dataset_type):
                  for j, (frame, camera) in enumerate(zip(frames, cameras))]
 
         recordio_file.write_idx(i, pickle.dumps(views))
+        pb.update(1)
+    pb.close()
 
     recordio_file.close()
 

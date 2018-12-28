@@ -176,7 +176,7 @@ class ConvDRAW(HybridBlock):
         from the model because the model looks at the image it is trying to generate. However, this is useful for seeing
         how the model generates a particular image.
 
-        :param x: Input to generate images from. This is not really an unconditional sample from the model. This is
+        :param x: Input to generate images from.
         :param include_intermediate: If True, samples from all timesteps (not only the last timestep) are returned.
         :return: n x *image_shape array of generated samples. If include_intermediate is True,
             then steps x n x *image_shape.
