@@ -213,6 +213,8 @@ class ConvDRAW(HybridBlock):
             _, (h_dec, c_dec) = self._dec_rnn(nd.concat(dec_z, encoded_r, dim=1), [h_dec, c_dec])
             r = r + self._dec_nn(h_dec)
 
+        rs.append(nd.sigmoid(r))
+
         if include_intermediate:
             samples = nd.stack(*rs, axis=0)
         else:

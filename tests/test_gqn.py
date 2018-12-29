@@ -29,15 +29,22 @@ def test_normal_fit_loss():
 def test_representation_network():
     batch_size = 3
     context_size = 2
-    rep_nn = RepresentationNetworkTower(batch_size=3)
-    rep_nn.initialize(ctx=mx.cpu())
+    num_camera_params = 7
+    rep_nn = RepresentationNetworkTower(batch_size=3, num_camera_params=num_camera_params)
+    rep_nn.initialize(ctx=mx.cpu(), init=mx.init.Uniform(1.0))
 
     frames = nd.random.uniform(shape=(batch_size, context_size, 3, 64, 64))
-    cameras = nd.random.uniform(shape=(batch_size, context_size, 7))
+    cameras = nd.random.uniform(shape=(batch_size, context_size, num_camera_params))
 
     out = rep_nn(frames, cameras)
 
     assert out.shape == (batch_size, 256, 16, 16)
+
+    # check that each scene is processed separately
+    rep_nn._batch_size = 1
+    outs = [rep_nn(f, c) for f, c in zip(frames, cameras)]
+    for i, out_i in enumerate(outs):
+        assert np.allclose(out_i.asnumpy(), out[i].asnumpy())
 
 
 class _MockRepresentationNetwork(HybridBlock):
@@ -92,7 +99,7 @@ def test_gradient():
 
     gqn_nn = GenerativeQueryNetwork(rep_nn, enc_nn, dec_nn, num_steps=2, batch_size=batch_size, input_shape=input_shape,
                                     num_latent_maps=num_latent_maps, num_camera_params=num_camera_params,
-                                    encoder_output_shape=(2, 2, 2), representation_shape=(1, 2, 2),
+                                    downsample_output_shape=(2, 2, 2), representation_shape=(1, 2, 2),
                                     rnn_hidden_channels=1, kernel_size=(1, 1), ctx=ctx)
     model_params = gqn_nn.collect_params()
     mx.random.seed(np.random.randint(1000000))

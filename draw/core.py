@@ -279,6 +279,8 @@ class DRAW(HybridBlock):
             attn_params.append(attn_param)
             canvas = canvas + w
 
+        canvases.append(nd.sigmoid(canvas))
+
         if include_intermediate:
             samples = nd.stack(*canvases, axis=0)
         else:

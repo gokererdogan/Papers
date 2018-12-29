@@ -1,6 +1,7 @@
+import abc
 import pickle
 from time import strftime
-from typing import List, Callable, Tuple, Union
+from typing import List, Callable, Tuple, Union, Dict
 import os
 from pathlib import Path
 
@@ -186,9 +187,10 @@ class PlotGenerateImage:
     def __init__(self, nn: HybridBlock, freq: int, image_shape: Union[Tuple[int, int], Tuple[int, int, int]],
                  conditioning_variables: Tuple[nd.NDArray] = tuple()):
         """
-        :param nn: Generative model to sample from. Must implement generate method. See DRAW for an example.
+        :param nn: Generative model to sample from. Must implement generate method. See DRAW for an example. Assumes
+            the output has shape BxCxHxW.
         :param freq: Plotting frequency.
-        :param image_shape: Image shape.
+        :param image_shape: Image shape. (CxHxW or HxW).
         """
         self._nn = nn
         self._freq = freq
@@ -200,7 +202,8 @@ class PlotGenerateImage:
         if samples_processed - self._last_call > self._freq:
             self._last_call = samples_processed
             # generate image from model
-            img = self._nn.generate(*self._conditioning_variables).asnumpy()[0].reshape(self._image_shape)
+            samples = self._nn.generate(*self._conditioning_variables).asnumpy()
+            img = samples.reshape((samples.shape[0], *self._image_shape))
             mxb_writer.add_image('Generated_image', img, samples_processed)
 
 
@@ -226,9 +229,22 @@ class PlotGradientHistogram:
                     mxb_writer.add_histogram(k, g, samples_processed, bins=10)
 
 
-def train(forward_fn: Callable[[mx.io.DataBatch], nd.NDArray], train_iter: mx.io.DataIter, val_iter: mx.io.DataIter,
+class HyperparamScheduler(metaclass=abc.ABCMeta):
+    """
+    Interface for hyperparam scheduler.
+
+    train function calls get_hyperparams method to get a dictionary of params that is then passed to forward function.
+    This allows one to specify schedules for training parameters like pixel std deviation in GQN.
+    """
+    def get_hyperparams(self, samples_processed: int) -> Dict[str, float]:
+        pass
+
+
+def train(forward_fn: Callable[[mx.io.DataBatch, Dict[str, float]], nd.NDArray],
+          train_iter: mx.io.DataIter, val_iter: mx.io.DataIter,
           trainer: Trainer, num_train_samples: int, num_val_samples: int, val_freq: int,
-          logdir: str, run_suffix: str = '',
+          logdir: str, run_suffix: str = '', validate_at_end: bool = True,
+          hyperparam_scheduler: HyperparamScheduler = None,
           plot_callbacks: Tuple[Callable[[mxboard.SummaryWriter, int], None]] = tuple()):
     """
     Train the model given by its forward function.
@@ -243,22 +259,30 @@ def train(forward_fn: Callable[[mx.io.DataBatch], nd.NDArray], train_iter: mx.io
     :param val_freq: Validation frequency (in number of samples).
     :param logdir: Log directory for mxboard.
     :param run_suffix: Suffix for run id.
+    :param validate_at_end: If True, run validation over the full validation set at the end.
+    :param hyperparam_scheduler: Hyperparam scheduler. train calls get_hyperparams method of scheduler and passes the
+        returned dictionary to forward function.
     :param plot_callbacks: A list of additional plotting callbacks. These are called after each update. A plotting
       callback should expect a mxboard.SummaryWriter and the iteration number. See DRAW/train_mnist.py for an example.
     """
-    run_id = '{}{}'.format(strftime('%Y%m%d%H%M%S'), run_suffix)
+    run_id = '{}_{}'.format(strftime('%Y%m%d%H%M%S'), run_suffix)
     sw = mxboard.SummaryWriter(logdir=os.path.join(logdir, run_id))
     pm = tqdm.tqdm(total=num_train_samples)
 
     last_val_loss = np.inf
     last_val_time = 0
     samples_processed = 0
+
+    train_params = {}
+    if hyperparam_scheduler:
+        train_params = hyperparam_scheduler.get_hyperparams(samples_processed=0)
+
     while samples_processed < num_train_samples:
         batch = _get_batch(train_iter)
 
         # train step
         with autograd.record():
-            loss = forward_fn(batch)
+            loss = forward_fn(batch, **train_params)
         autograd.backward(loss)
 
         batch_size = loss.shape[0]
@@ -281,7 +305,7 @@ def train(forward_fn: Callable[[mx.io.DataBatch], nd.NDArray], train_iter: mx.io
             j = 0
             while j < num_val_samples:
                 batch = _get_batch(val_iter)
-                loss = forward_fn(batch)
+                loss = forward_fn(batch, **train_params)
                 tot_val_loss += nd.sum(loss).asscalar()
                 j += loss.shape[0]
 
@@ -289,19 +313,24 @@ def train(forward_fn: Callable[[mx.io.DataBatch], nd.NDArray], train_iter: mx.io
             sw.add_scalar('Loss', {'Validation': last_val_loss}, samples_processed)
             sw.flush()
 
+        # call hyperparam scheduler
+        if hyperparam_scheduler:
+            train_params = hyperparam_scheduler.get_hyperparams(samples_processed=samples_processed)
+
         pm.set_postfix({'Train loss': last_train_loss, 'Val loss': last_val_loss})
 
-    # calculate loss on the whole validation set
-    tot_val_loss = 0.0
-    j = 0
-    for batch in val_iter:
-        loss = forward_fn(batch)
-        tot_val_loss += nd.sum(loss).asscalar()
-        j += loss.shape[0]
+    if validate_at_end:
+        # calculate loss on the whole validation set
+        tot_val_loss = 0.0
+        j = 0
+        for batch in val_iter:
+            loss = forward_fn(batch, **train_params)
+            tot_val_loss += nd.sum(loss).asscalar()
+            j += loss.shape[0]
 
-    last_val_loss = tot_val_loss / j  # loss per sample
-    sw.add_scalar('Loss', {'Validation_final': last_val_loss}, samples_processed)
-    pm.set_postfix({'Train loss': last_train_loss, 'Val loss': last_val_loss})
+        last_val_loss = tot_val_loss / j  # loss per sample
+        sw.add_scalar('Loss', {'Validation_final': last_val_loss}, samples_processed)
+        pm.set_postfix({'Train loss': last_train_loss, 'Val loss': last_val_loss})
 
     pm.close()
     sw.flush()
