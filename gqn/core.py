@@ -8,15 +8,18 @@ An MxNet implementation of the convolutional recurrent variational autoencoder d
 goker erdogan
 https://github.com/gokererdogan
 """
+import os
 from typing import Optional, Tuple, Union
 
+import imageio
 import mxnet as mx
 import mxnet.ndarray as nd
 import numpy as np
 from mxnet.gluon.contrib.rnn import Conv2DLSTMCell
 from mxnet.gluon.nn import Conv2D, HybridBlock
+from skimage import transform
 
-from common import WithELU, HyperparamScheduler
+from common import WithELU, HyperparamScheduler, GQNDataIter
 from convdraw.core import ConvDRAWLoss
 from vae.core import NormalSamplingBlock
 
@@ -142,7 +145,6 @@ class GenerativeQueryNetwork(HybridBlock):
         - Similarly, a decoder network maps the output of generation LSTM to an image with the right size. (Eq. S16).
         - GQN doesn't calculate an error image in contrast to the ConvDRAW and DRAW models. It uses the image directly.
         - GQN generation LSTM (i.e., decoder LSTM) doesn't take the canvas as input in contrast to ConvDRAW model.
-    TODO: add docstring
     """
     def __init__(self, representation_nn: HybridBlock, downsample_nn: HybridBlock, upsample_nn: HybridBlock,
                  num_steps: int, batch_size: int,
@@ -322,3 +324,97 @@ class GenerativeQueryNetwork(HybridBlock):
             out = self._out_layer(u)
 
         return out, nd.stack(*qs, axis=0), nd.stack(*ps, axis=0)  # qs and ps: steps x batch x latent
+
+
+def generate_samples(gqn_nn: GenerativeQueryNetwork, data_iter: GQNDataIter, context_size: int,
+                     image_shape: Tuple[int, int, int],
+                     save_path: str, save_prefix: str,
+                     scale_factor: float = 1.):
+    """
+    Generate samples from GQN and save them to disk.
+
+    :param gqn_nn: Trained GQN model.
+    :param data_iter: Data iterator to sample the context (i.e., conditioning variables) from.
+    :param context_size: Number of context images.
+    :param image_shape: CxHxW of image.
+    :param save_path: Path to save gif files in.
+    :param save_prefix: Prefix for gif filenames.
+    :param scale_factor: Scale images by this factor.
+    :return:
+    """
+    orig_context_size = data_iter._context_size_range
+    data_iter._context_size_range = (context_size,)
+    batch = data_iter.next()
+    data_iter._context_size_range = orig_context_size
+    context_frames, context_cameras, query_cameras = batch.data[:3]
+    query_frames = batch.label[0]
+    samples = gqn_nn.generate(query_cameras, context_frames, context_cameras, include_intermediate=False)
+
+    samples = samples.transpose((0, 2, 3, 1))  # from CxHxW to HxWxC
+    samples = (samples.asnumpy() * 255).astype(np.uint8)
+    context_frames = context_frames.transpose((0, 1, 3, 4, 2))
+    context_frames = (context_frames.asnumpy() * 255).astype(np.uint8)
+    query_frames = query_frames.transpose((0, 2, 3, 1))
+    query_frames = (query_frames.asnumpy() * 255).astype(np.uint8)
+
+    for i, sample in enumerate(samples):
+        img = np.zeros((image_shape[1], image_shape[2]*(context_size+2), image_shape[0]), dtype=np.uint8)
+        for j, cf in enumerate(context_frames[i]):
+            img[:, j*image_shape[2]:(j+1)*image_shape[2], :] = cf
+        img[:, -2*image_shape[2]:-image_shape[2], :] = query_frames[i]
+        img[:, -image_shape[2]:, :] = sample
+
+        file_path = os.path.join(save_path, "{}_{}.png".format(save_prefix, i))
+        # rescale image
+        scaled_sample = transform.rescale(img, scale=scale_factor, anti_aliasing=True, multichannel=True,
+                                          preserve_range=True).astype(np.uint8)
+
+        imageio.imwrite(file_path, scaled_sample)
+
+
+def generate_sampling_gif(gqn_nn: GenerativeQueryNetwork, data_iter: GQNDataIter, context_size: int,
+                          image_shape: Tuple[int, int, int],
+                          save_path: str, save_prefix: str, scale_factor: float = 1.):
+    """
+    Generate animations of sampling from the given model.
+
+    :param gqn_nn: Trained GQN model.
+    :param data_iter: Data iterator to sample the context (i.e., conditioning variables) from.
+    :param context_size: Number of context images.
+    :param image_shape: CxHxW of image.
+    :param save_path: Path to save gif files in.
+    :param save_prefix: Prefix for gif filenames.
+        attention.
+    :param scale_factor: Scale images by this factor.
+    :return:
+    """
+    orig_context_size = data_iter._context_size_range
+    data_iter._context_size_range = (context_size,)
+    batch = data_iter.next()
+    data_iter._context_size_range = orig_context_size
+    context_frames, context_cameras, query_cameras = batch.data[:3]
+    query_frames = batch.label[0]
+    samples = gqn_nn.generate(query_cameras, context_frames, context_cameras, include_intermediate=True)
+
+    samples = samples.transpose((1, 0, 3, 4, 2))  # from CxHxW to HxWxC
+    samples = (samples.asnumpy() * 255).astype(np.uint8)
+    context_frames = context_frames.transpose((0, 1, 3, 4, 2))
+    context_frames = (context_frames.asnumpy() * 255).astype(np.uint8)
+    query_frames = query_frames.transpose((0, 2, 3, 1))
+    query_frames = (query_frames.asnumpy() * 255).astype(np.uint8)
+
+    for i, sample in enumerate(samples):
+        scaled_samples = []
+        file_path = os.path.join(save_path, "{}_{}.gif".format(save_prefix, i))
+        for t, sample_t in enumerate(sample):
+            img = np.zeros((image_shape[1], image_shape[2]*(context_size+2), image_shape[0]), dtype=np.uint8)
+            for j, cf in enumerate(context_frames[i]):
+                img[:, j*image_shape[2]:(j+1)*image_shape[2], :] = cf
+            img[:, -2*image_shape[2]:-image_shape[2], :] = query_frames[i]
+            img[:, -image_shape[2]:, :] = sample_t
+
+            # rescale image
+            scaled_samples.append(transform.rescale(img, scale=scale_factor, anti_aliasing=True, multichannel=True,
+                                  preserve_range=True).astype(np.uint8))
+
+        imageio.mimwrite(file_path, scaled_samples, duration=0.1)

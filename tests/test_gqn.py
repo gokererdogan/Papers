@@ -1,12 +1,9 @@
 import mxnet as mx
 import mxnet.ndarray as nd
-from mxnet.gluon import nn, HybridBlock
 import numpy as np
-import pytest
-from mxnet.gluon.loss import SigmoidBinaryCrossEntropyLoss
+from mxnet.gluon import nn, HybridBlock
 
 from common import check_gradient
-from convdraw.core import ConvDRAWLossKLTerm, ConvDRAWLoss, ConvDRAW
 from gqn.core import RepresentationNetworkTower, NormalFitLoss, GenerativeQueryNetwork, GQNLoss
 
 
@@ -100,6 +97,7 @@ def test_gradient():
     gqn_nn = GenerativeQueryNetwork(rep_nn, enc_nn, dec_nn, num_steps=2, batch_size=batch_size, input_shape=input_shape,
                                     num_latent_maps=num_latent_maps, num_camera_params=num_camera_params,
                                     downsample_output_shape=(2, 2, 2), representation_shape=(1, 2, 2),
+                                    upsample_output_shape=(1, 2, 2),
                                     rnn_hidden_channels=1, kernel_size=(1, 1), ctx=ctx)
     model_params = gqn_nn.collect_params()
     mx.random.seed(np.random.randint(1000000))
