@@ -83,4 +83,4 @@ tensorboard --logdir=results
 [1] S. M. Ali Eslami, Danilo J. Rezende, Frederic Besse, Fabio Viola, Ari S. Morcos, Marta
 Garnelo, Avraham Ruderman, Andrei A. Rusu, Ivo Danihelka, Karol Gregor, David P. Reichert,
 Lars Buesing, Theophane Weber, Oriol Vinyals, Dan Rosenbaum, Neil Rabinowitz, Helen King,
-Chloe Hillier, Matt Botvinick, Daan Wierstra, Koray Kavukcuoglu, Demis Hassabis. *Neural scene representation and rendering*. Science 2018. http://science.sciencemag.org/content/360/6394/1204.full?ijkey=kGcNflzOLiIKQ
+Chloe Hillier, Matt Botvinick, Daan Wierstra, Koray Kavukcuoglu, Demis Hassabis. *Neural scene representation and rendering*. Science 2018. http://science.sciencemag.org/content/360/6394/1204.full
