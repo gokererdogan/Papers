@@ -22,7 +22,7 @@ mxnet-cu80==1.2.1
 networkx==2.1
 numpy==1.14.5
 pathlib2==2.3.2
-Pillow==6.2.0
+Pillow==8.1.1
 pkg-resources==0.0.0
 pluggy==0.7.1
 protobuf==3.6.0
