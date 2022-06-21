@@ -20,7 +20,7 @@ more-itertools==4.3.0
 mxboard==0.1.0
 mxnet-cu80==1.2.1
 networkx==2.1
-numpy==1.14.5
+numpy==1.22.0
 pathlib2==2.3.2
 Pillow==6.2.0
 pkg-resources==0.0.0
